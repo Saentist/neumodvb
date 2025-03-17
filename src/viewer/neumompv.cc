@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -203,12 +203,6 @@ void MpvGLCanvas::OnMpvWakeupEvent(wxThreadEvent&) {
 		mpv_player->on_mpv_wakeup_event();
 }
 
-void MpvGLCanvas::OnMpvRedrawEvent(wxThreadEvent&) // MPV_CALLBACK
-{
-	assert(0);
-	this->Render();
-}
-
 void MpvGLCanvas::DoRender() // MPV_CALLBACK
 {
 	SetCurrent();
@@ -227,8 +221,6 @@ void MpvGLCanvas::DoRender() // MPV_CALLBACK
 	} else {
 		dterrorf("ONRENDER NOT READY");
 	}
-
-	static int called = 0;
 	// glClearColor(0.0, 0.0, 0.0, 0.0);
 	// glClear(GL_COLOR_BUFFER_BIT);
 	SetCurrent();
@@ -503,8 +495,8 @@ bool MpvPlayer_::create() {
 	mpv_opengl_init_params gl_init_params{get_proc_address, gl_canvas};
 #pragma clang diagnostic pop
 	mpv_render_param params[]{{MPV_RENDER_PARAM_API_TYPE, const_cast<char*>(MPV_RENDER_API_TYPE_OPENGL)},
-		{MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl_init_params},
-		{MPV_RENDER_PARAM_INVALID, nullptr}};
+														{MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl_init_params},
+														{MPV_RENDER_PARAM_INVALID, nullptr}};
 	if (mpv_render_context_create(&mpv_gl, mpv, params) < 0) {
 		dterrorf("failed to initialize mpv GL context");
 		assert(0);
@@ -962,6 +954,7 @@ void mpv_subscription_t::close(bool unsubscribe) {
 int mpv_subscription_t::stop_play() {
 	auto subscription_id = subscriber->get_subscription_id();
 	dtdebugf("STOP SUBSCRIPTION {:d}", (int) subscription_id);
+	subscriber->unsubscribe();
 	std::scoped_lock lck(m);
 	if (mpm) {
 		mpm->close();
@@ -970,7 +963,6 @@ int mpv_subscription_t::stop_play() {
 		}
 	}
 
-	subscriber->unsubscribe();
 	if (mpm)
 		mpm.reset();
 	return 0;
@@ -1144,12 +1136,6 @@ void MpvPlayer::close() {
 	self->subscription.set_pending_close(true);
 }
 
-#if 0
-void MpvPlayer_::repaint() {
-	wxPaintEvent evt(wxID_ANY);
-	gl_canvas->AddPendingEvent(evt);
-}
-#endif
 //! returns true if this was the right mpv
 void MpvPlayer_::notify(const signal_info_t& signal_info) {
 	std::scoped_lock lck(m);
@@ -1158,12 +1144,9 @@ void MpvPlayer_::notify(const signal_info_t& signal_info) {
 	auto* as = subscription.mpm->active_service();
 	if (!as)
 		return;
-	if (as->get_adapter_lnb_key() == signal_info.stat.k.rf_path.lnb) {
-		playback_info_t playback_info = subscription.mpm->get_current_program_info();
-		gl_canvas->overlay.set_signal_info(signal_info, playback_info);
-		subscription.show_radiobg = (playback_info.service.media_mode == chdb::media_mode_t::RADIO);
-		return;
-	}
+	playback_info_t playback_info = subscription.mpm->get_current_program_info();
+	gl_canvas->overlay.set_signal_info(signal_info, playback_info);
+	subscription.show_radiobg = (playback_info.service.media_mode == chdb::media_mode_t::RADIO);
 	return;
 }
 

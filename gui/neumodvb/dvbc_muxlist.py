@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -87,7 +87,7 @@ class DvbcMuxTable(NeumoTable):
                          screen_getter = screen_getter,
                          initial_sorted_column = initial_sorted_column, **kwds)
 
-    def __save_record__(self, txn, record):
+    def __save_record__(self, txn, record, old_record):
         pychdb.dvbc_mux.make_unique_if_template(txn, record)
         pychdb.put_record(txn, record)
         return record
@@ -217,10 +217,10 @@ class DvbcMuxGrid(NeumoGridBase):
         scan_command=self.CmdCreateScanHelper(with_schedule=False)
         muxes, subscription_type = (None, None) if scan_command is None else \
             (scan_command.dvbc_muxes, scan_command.tune_options.subscription_type)
-        assert subscription_type ==  pydevdb.subscription_type_t.MUX_SCAN
         if scan_command is None or muxes is None:
             dtdebug(f'CmdScan aborted for {0 if muxes is None else len(muxes)} muxes')
             return
+        assert subscription_type ==  pydevdb.subscription_type_t.MUX_SCAN
         dtdebug(f'CmdScan requested for {len(muxes)} muxes')
         self.app.MuxScan(muxes, scan_command.tune_options)
 

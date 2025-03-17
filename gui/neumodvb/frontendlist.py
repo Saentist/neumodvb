@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -42,8 +42,16 @@ def delsys_fn(x):
     vals= set([enum_to_str(xx).split('_')[0] for xx in x[1]])
     vals = vals.difference(set(['AUTO']))
     return "/".join(vals)
+
 def rf_inputs_fn(x):
     return " ".join(str(v) for v in x[1])
+
+def rf_inputs_with_cablenos_fn(x):
+    cable_nos=[c for c in x[0].cable_nos]
+    rf_ins=[r for r in x[0].rf_inputs]
+    if len(cable_nos) < len(rf_ins):
+        cable_nos = cable_nos + [-1] * (len(rf_ins) - len(cable_nos))
+    return " ".join(f'{r}:Ca{c}' for r,c in zip(rf_ins, cable_nos))
 
 def subscription_fn(x):
     fesub = x[0].sub
@@ -117,7 +125,7 @@ class FrontendTable(NeumoTable):
     datetime_fn =  lambda x: datetime.datetime.fromtimestamp(x[1], tz=tz.tzlocal()).strftime("%Y-%m-%d %H:%M:%S")
     all_columns = \
         [CD(key='adapter_name',  label='adapter', basic=True, no_combo=True, readonly=True,
-            example="TurboSight TBS 6916X #12 "),
+            dfn = lambda x: x[1].split(" ")[0], example="A18 "),
          #CD(key='adapter_no',  label='Adap', basic=True, readonly=True),
          CD(key='k.frontend_no',  label='fe', basic=True, readonly=True),
          CD(key='card_no',  label='card#', basic=True, readonly=False, sfn=card_no_sfn),
@@ -133,14 +141,14 @@ class FrontendTable(NeumoTable):
          CD(key='card_mac_address',  label='CARD MAC', basic=True, no_combo=True, readonly=True,
             dfn=mac_fn, example=" AA:BB:CC:DD:EE:FF "),
          CD(key='k.adapter_mac_address',  label='ADAP MAC', basic=True, no_combo=True, readonly=True, dfn=mac_fn, example=" AA:BB:CC:DD:EE:FF "),
-         CD(key='card_address',  label='Bus', basic=True, example=" 0000:03:00.0 "),
-         CD(key='present',  label='present', basic=True, dfn=bool_fn, readonly=True),
-         CD(key='can_be_used',  label='available', basic=True, dfn=bool_fn, readonly=True),
+         CD(key='present',  label='pres\nent', basic=True, dfn=bool_fn, readonly=True),
+         CD(key='can_be_used',  label='avail\nable', basic=True, dfn=bool_fn, readonly=True),
          CD(key='supports.multistream',  label='MIS', basic=True, dfn=bool_fn, readonly=True),
          CD(key='supports.blindscan',  label='blind\n-scan', basic=True, dfn=bool_fn, readonly=True),
          CD(key='supports.spectrum_sweep',  label='spec\nsweep', basic=True, dfn=bool_fn, readonly=True),
          CD(key='supports.spectrum_fft',  label='spec\nfft', basic=True, dfn=bool_fn, readonly=True),
-         CD(key='delsys',  label='delsys', basic=True, dfn=delsys_fn, readonly=True, example='DVBT/'*6)
+         CD(key='delsys',  label='delsys', basic=True, dfn=delsys_fn, readonly=True, example='DVBT/'*6),
+         CD(key='card_address',  label='Bus', basic=True, example=" 0000:03:00.0 ")
         ]
 
     def __init__(self, parent, basic=False, *args, **kwds):
@@ -159,7 +167,7 @@ class FrontendTable(NeumoTable):
                                    field_matchers=matchers, match_data = match_data)
         self.screen = screen_if_t(screen, self.sort_order==2)
 
-    def __save_record__(self, txn, record):
+    def __save_record__(self, txn, record, old_record):
         dtdebug(f'saving {record.k.adapter_mac_address}')
         pydevdb.put_record(txn, record)
         return record

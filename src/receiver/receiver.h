@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -371,21 +371,22 @@ private:
 	template<typename mux_t>
 	subscription_id_t scan_muxes(std::vector<task_queue_t::future_t>& futures, ss::vector_<mux_t>& muxes,
 															 const subscription_options_t& tune_options,
-															 int max_num_subscriptions,
+															 int max_num_subscriptions, const std::chrono::seconds& max_idle_time,
 															 ssptr_t ssptr);
 
 	subscription_id_t scan_spectral_peaks(std::vector<task_queue_t::future_t>& futures,
 																				const devdb::rf_path_t& rf_path,
 																				ss::vector_<chdb::spectral_peak_t>& peaks,
 																				const statdb::spectrum_key_t& spectrum_key,
-																				bool scan_found_muxes, int max_num_subscriptions,
+																				bool scan_found_muxes,
+																				int max_num_subscriptions, const std::chrono::seconds& max_idle_time,
 																				ssptr_t scan_ssptr);
 
 	subscription_id_t scan_bands(std::vector<task_queue_t::future_t>& futures,
 															 const ss::vector_<chdb::sat_t>& sats,
 															 const ss::vector_<chdb::fe_polarisation_t>& pols,
 															 const subscription_options_t& tune_options,
-															 int max_num_subscriptions,
+															 int max_num_subscriptions, const std::chrono::seconds& max_idle_time,
 															 ssptr_t ssptr);
 
 	subscription_id_t subscribe_spectrum(std::vector<task_queue_t::future_t>& futures, const devdb::lnb_t& lnb,
@@ -510,7 +511,7 @@ public:
 	epgdb::epgdb_t epgdb;
 	recdb::recdb_t recdb;
 
-	using subscriber_map = safe::Safe<std::map<void*, ssptr_t>, std::recursive_mutex>;
+	using subscriber_map = safe::Safe<std::map<void*, ssptr_t>, std::shared_mutex>;
 	subscriber_map subscribers;//indexed by address
 
 	std::shared_ptr<subscriber_t> global_subscriber; //for sending error messages

@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  *
  * Copyright notice:
  *
@@ -438,6 +438,12 @@ update_mux_ret_t chdb::update_mux(db_txn& wtxn, mux_t& mux_to_save, system_time_
 		auto tmp_key = mux_to_save.k;
 		tmp_key.mux_id = db_mux.k.mux_id;
 		auto key_matches = tmp_key == db_mux.k;
+		if(!key_matches)  {
+			dtdebugf("tmp_key={} db_mux.k={}", tmp_key, db_mux.k);
+			assert(std::abs(tmp_key.sat_pos - db_mux.k.sat_pos)<=sat_pos_tolerance);
+			tmp_key.sat_pos = db_mux.k.sat_pos;
+			key_matches = tmp_key == db_mux.k;
+		}
 		assert(key_matches);
 #else
 #endif
@@ -479,7 +485,7 @@ update_mux_ret_t chdb::update_mux(db_txn& wtxn, mux_t& mux_to_save, system_time_
 			}
 		}
 
-		dtdebugf("Transponder {}: sat_pos={:d} => {:d}; mux_id={:d} => {:d}; stream_id={:d} => {:d}; t2mi_pid={:d} =< {:d}",
+		dtdebugf("Transponder {}: sat_pos={:d} => {:d}; mux_id={:d} => {:d}; stream_id={:d} => {:d}; t2mi_pid={:d} => {:d}",
 						 merged_mux,
 						 db_mux.k.sat_pos, merged_mux.k.sat_pos,
 						 db_mux.k.mux_id, merged_mux.k.mux_id,
@@ -1080,7 +1086,7 @@ chdb::select_sat_and_reference_mux(db_txn& chdb_rtxn, const devdb::lnb_t& lnb,
 	auto return_mux = [&chdb_rtxn, &lnb, &return_some_mux](const devdb::lnb_network_t& network)
 		-> std::tuple<std::optional<chdb::dvbs_mux_t>, std::optional<chdb::sat_t>>
 		{
-			auto cs = chdb::sat_t::find_by_key(chdb_rtxn, network.sat_pos, devdb::lnb::sat_band(lnb));
+			auto cs = chdb::sat_t::find_by_key(chdb_rtxn, network.sat_pos, devdb::lnb::sat_band(lnb.k));
 			std::optional<chdb::sat_t> sat;
 			if (cs.is_valid())
 				sat= cs.current();
@@ -1126,7 +1132,7 @@ chdb::select_sat_and_reference_mux(db_txn& chdb_rtxn, const devdb::lnb_t& lnb,
 	using namespace chdb;
 	const bool disregard_networks{false};
 	if (proposed_mux && lnb_can_tune_to_mux(lnb, *proposed_mux, disregard_networks)) {
-		auto cs = chdb::sat_t::find_by_key(chdb_rtxn, proposed_mux->k.sat_pos, devdb::lnb::sat_band(lnb));
+		auto cs = chdb::sat_t::find_by_key(chdb_rtxn, proposed_mux->k.sat_pos, devdb::lnb::sat_band(lnb.k));
 		return {*proposed_mux, cs.is_valid() ? cs.current() : chdb::sat_t{}};
 	}
 	{
@@ -1157,7 +1163,7 @@ chdb::select_sat_and_reference_mux(db_txn& chdb_rtxn, const devdb::lnb_t& lnb,
 		} else if( bestp && !lnb.on_positioner) {
 			return return_mux(*bestp);
 		}
-		auto cs = chdb::sat_t::find_by_key(chdb_rtxn, lnb.lnb_usals_pos, devdb::lnb::sat_band(lnb));
+		auto cs = chdb::sat_t::find_by_key(chdb_rtxn, lnb.lnb_usals_pos, devdb::lnb::sat_band(lnb.k));
 		std::optional<chdb::sat_t> sat = cs.is_valid() ? cs.current() : chdb::sat_t();
 		if(!sat)
 			return {{}, sat};

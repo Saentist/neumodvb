@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -32,9 +32,7 @@ from neumodvb.util import setup, lastdot
 from neumodvb.neumolist import NeumoTable, NeumoGridBase, IconRenderer, screen_if_t, MyColLabelRenderer, lnb_network_str
 from neumodvb.neumo_dialogs import ShowMessage, ShowOkCancel
 from neumodvb.util import dtdebug, dterror
-from neumodvb.lnb_dialog import  LnbNetworkDialog, LnbConnectionDialog
-from neumodvb.lnbnetworklist import LnbNetworkGrid
-
+from neumodvb.lnb_dialog import  LnbNetworkDialog, LnbConnectionDialog, LnbUnicableChannelDialog
 import pychdb
 import pydevdb
 
@@ -85,6 +83,10 @@ def lnbnetwork_fn(x):
     return '; '.join([ strike_through(pychdb.sat_pos_str(network.sat_pos)) if not network.enabled \
                        else pychdb.sat_pos_str(network.sat_pos) for network in x[1]])
 
+def lnb_unicable_fn(x):
+    return '; '.join([ strike_through(str(uc.ch_id)) if not uc.enabled \
+                       else str(uc.ch_id) for uc in x[1]])
+
 class LnbTable(NeumoTable):
     CD = NeumoTable.CD
     adapter_fn = lambda x: x[0].adapter_name
@@ -123,8 +125,9 @@ class LnbTable(NeumoTable):
          CD(key='can_be_used',   label='avail-\nable', basic=False, readonly=True),
          CD(key='k.lnb_type',  label='LNB type', dfn=lambda x: lastdot(x)),
          CD(key='networks',   label='Networks', dfn=lnbnetwork_fn, example='19.0E; '*6),
-         CD(key='connections',  label='Connections', dfn=lnbconn_fn, example='C2#1 TBS6909X; '*4),
+         CD(key='connections',  label='Connections', dfn=lnbconn_fn, example='C2#1 TBS6909X; '*2),
          CD(key='pol_type',  label='POL\ntype', dfn=lambda x: lastdot(x), basic=False),
+         CD(key='unicable_channels',   label='unicable', dfn=lnb_unicable_fn, example='1: '*2),
          CD(key='priority',  label='prio'),
          CD(key='lof_offsets',  label='lof\noffset', dfn=lof_offset_fn, readonly = True,
             example='-2000kHz; -20000kHz'),
@@ -133,6 +136,7 @@ class LnbTable(NeumoTable):
          CD(key='freq_high',   label='freq\nmax', basic=False, dfn=freq_fn, example="10700.000"),
          CD(key='lof_low',   label='LOF\nlow', basic=False, dfn=freq_fn, example="10700.000"),
          CD(key='lof_high',   label='LOF\nhigh', basic=False, dfn=freq_fn, example="10700.000"),
+         CD(key='powerup_time',   label='pwup\ntime', basic=False, example="2000"),
         ]
 
     def __init__(self, parent, basic=False, *args, **kwds):
@@ -160,7 +164,7 @@ class LnbTable(NeumoTable):
             self.fe_screen =pydevdb.fe.screen(txn, sort_order=sort_order)
             self.aux_screens = [ self.fe_screen]
 
-    def __save_record__(self, txn, lnb):
+    def __save_record__(self, txn, lnb, old_record):
         if len(lnb.networks) == 0:
             if lnb.usals_pos != pychdb.sat.sat_pos_none:
                 cont = ShowOkCancel("Add network?",
@@ -236,7 +240,7 @@ class LnbGridBase(NeumoGridBase):
 
     def CheckShowDialog(self, evt, rowno, colno):
         key = self.table.columns[colno].key
-        if key in('networks', 'connections') and self.GetGridCursorRow() == rowno:
+        if key in('networks', 'connections', 'unicable_channels') and self.GetGridCursorRow() == rowno:
             if not hasattr(self, 'dlg'):
                 readonly = False
                 basic = False
@@ -247,6 +251,9 @@ class LnbGridBase(NeumoGridBase):
                 elif key == 'connections':
                     self.dlg = LnbConnectionDialog(self.GetParent(), lnb, title="LNB Connections",
                                                    basic=basic, readonly=readonly)
+                elif key == 'unicable_channels':
+                    self.dlg = LnbUnicableChannelDialog(self.GetParent(), lnb, title="LNB Unicable Channels",
+                                                        basic=basic, readonly=readonly)
             else:
                 pass
             self.dlg.Prepare(self)
@@ -288,6 +295,9 @@ class LnbGridBase(NeumoGridBase):
     def CmdTune(self, evt):
         row = self.GetGridCursorRow()
         lnb = self.table.screen.record_at_row(row)
+        if not lnb.enabled:
+            ShowMessage(f' LNB {lnb} not enabled')
+            return
         network = get_current_network(lnb)
         if network is None:
             ShowMessage("No ref mux", "Cannot find a ref mux")
@@ -306,6 +316,11 @@ class LnbGridBase(NeumoGridBase):
 
     def CmdPositioner(self, event):
         dtdebug('CmdPositioner')
+        row = self.GetGridCursorRow()
+        lnb = self.table.screen.record_at_row(row)
+        if not lnb.enabled:
+            ShowMessage(f' LNB {lnb} not enabled')
+            return
         self.OnPositioner(event)
 
     def OnPositioner(self, evt):
@@ -336,6 +351,9 @@ class LnbGridBase(NeumoGridBase):
         row = self.GetGridCursorRow()
         lnb = self.table.screen.record_at_row(row)
         dtdebug(f'Spectrum requested for lnb={lnb}')
+        if not lnb.enabled:
+            ShowMessage(f' LNB {lnb} not enabled')
+            return
         self.table.SaveModified()
         from neumodvb.spectrum_dialog import show_spectrum_dialog
         show_spectrum_dialog(self, lnb=lnb)

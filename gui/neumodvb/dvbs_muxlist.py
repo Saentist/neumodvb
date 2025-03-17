@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -57,7 +57,7 @@ class DvbsMuxTable(NeumoTable):
          CD(key='pls_code', label='Pls\nCode', example ='174526'),
          CD(key='fec', label='FEC', dfn=lambda x: lastdot(x).replace('FEC',''), example='AUTO'),
          CD(key='k.stream_id', label='ISI', basic=True, readonly=True),
-         CD(key='k.t2mi_pid', label='t2mi\npid', readonly=True, dfn = lambda x: x[1] if x[1]>=0 else ''),
+         CD(key='k.t2mi_pid', label='t2mi\npid', basic=True, readonly=True, dfn = lambda x: x[1] if x[1]>=0 else ''),
          CD(key='k.mux_id', label='mux\nid', readonly=True),
          CD(key='c.network_id', label='nid'),
          CD(key='c.ts_id', label='tsid'),
@@ -95,13 +95,13 @@ class DvbsMuxTable(NeumoTable):
                          screen_getter = screen_getter,
                          initial_sorted_column = initial_sorted_column, **kwds)
 
-    def __save_record__(self, txn, record):
+    def __save_record__(self, txn, record, old_record):
         pychdb.dvbs_mux.make_unique_if_template(txn, record)
         pychdb.put_record(txn, record) #this will overwrite any mux with given ts_id even if frequency is very wrong
         return record
     def get_filter_and_relax_(self):
         """
-        make some filters less strict to make them more practica
+        make some filters less strict to make them more practical
         """
         match_data, matchers = self.get_filter_()
         freq_field_id = self.data_table.subfield_from_name("frequency")
@@ -352,10 +352,10 @@ class DvbsMuxGridBase(NeumoGridBase):
         scan_command=self.CmdCreateScanHelper(with_schedule=False)
         muxes, subscription_type = (None, None) if scan_command is None else \
             (scan_command.dvbs_muxes, scan_command.tune_options.subscription_type)
-        assert subscription_type ==  pydevdb.subscription_type_t.MUX_SCAN
         if scan_command is None or muxes is None:
             dtdebug(f'CmdScan aborted for {0 if muxes is None else len(muxes)} muxes')
             return
+        assert subscription_type ==  pydevdb.subscription_type_t.MUX_SCAN
         dtdebug(f'CmdScan requested for {len(muxes)} muxes')
         self.app.MuxScan(muxes, scan_command.tune_options)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -149,6 +149,8 @@ lists_menu = (
     SEP,
     MI("LnbList",_("&LNBs\tShift-Ctrl-L"), ""),
     MI("DishList",_("&Dishes\tShift-Ctrl-D"), ""),
+    MI("CableList",_("&Cables\tShift-Ctrl-Q"), ""),
+    SEP,
     MI("SatList",_("&Satellites\tShift-Ctrl-A"), ""),
     MI("ChgList",_("&Bouquets\tShift-Ctrl-B"), ""),
     SEP,

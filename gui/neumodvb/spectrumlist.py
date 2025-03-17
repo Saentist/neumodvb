@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -89,7 +89,7 @@ class SpectrumTable(NeumoTable):
         self.screen = screen_if_t(screen, self.sort_order==2)
 
 
-    def __save_record__(self, txn, record):
+    def __save_record__(self, txn, record, old_record):
         pystatdb.put_record(txn, record)
         return record
     def __new_record__(self):

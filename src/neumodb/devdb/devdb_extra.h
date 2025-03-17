@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -56,6 +56,7 @@ namespace devdb {
 	int16_t make_unique_id(db_txn& txn, const devdb::lnb_key_t& key);
 	int16_t make_unique_id(db_txn& txn, const devdb::scan_command_t& scan_command);
 	int16_t make_unique_id(db_txn& txn, const devdb::stream_t& streamer);
+	int16_t make_unique_id(db_txn& devdb_rtxn, const devdb::cable_t& cable);
 
 	devdb::lnb_t lnb_for_lnb_id(db_txn& devdb_rtxn, int8_t dish_id, int16_t lnb_id);
 
@@ -82,6 +83,10 @@ namespace devdb {
 	bool lnb_can_scan_sat_band(const devdb::lnb_t& lnb, const chdb::sat_t& sat,
 														 const chdb::band_scan_t& band_scan,
 														 bool disregard_networks, ss::string_* error=nullptr);
+	inline bool is_unicable_lnb(const devdb::lnb_t& lnb) {
+		return lnb.unicable_channels.size() > 0;
+	}
+
 
 };
 
@@ -140,10 +145,16 @@ namespace devdb {
 			USALS  = 0x4,
 			CONNECTIONS = 0x8,
 			NETWORKS = 0x10,
-			REF_MUX = 0x20,
+			UNICABLE_CHANNELS = 0x20,
+			REF_MUX = 0x40,
 			ALL = 0xffff,
 		};
 	};
+};
+
+namespace devdb::cable {
+	void update_cable(db_txn& devdb_wtxn, devdb::cable_t& cable,
+										const std::optional<devdb::cable_t> old_cable);
 };
 
 namespace devdb::lnb {
@@ -195,6 +206,9 @@ namespace devdb::lnb {
 
 	bool add_or_edit_network(lnb_t& lnb, const usals_location_t& loc, lnb_network_t& network);
 	bool add_or_edit_connection(db_txn& devdb_txn, lnb_t& lnb, lnb_connection_t& connection);
+	bool add_or_edit_unicable_channel(db_txn& devdb_txn, devdb::lnb_t& lnb,
+																		devdb::unicable_ch_t& unicable_ch);
+
 
 	bool update_lnb_network_from_positioner(db_txn& devdb_wtxn, lnb_t&  lnb, int16_t current_sat_pos);
 	bool update_lnb_connection_from_positioner(db_txn& devdb_wtxn, devdb::lnb_t&  lnb,
@@ -228,7 +242,7 @@ namespace devdb::lnb {
 		}
 	}
 
-	chdb::sat_band_t sat_band(const devdb::lnb_t& lnb);
+	chdb::sat_band_t sat_band(const devdb::lnb_key_t& lnb_key);
 }
 
 namespace devdb::fe {
@@ -304,6 +318,8 @@ namespace devdb::fe_subscription {
 		format_context::iterator format(const t&, format_context& ctx) const ; \
 	}
 
+declfmt(devdb::unicable_ch_t);
+declfmt(devdb::rf_path_t);
 declfmt(devdb::lnb_key_t);
 declfmt(devdb::lnb_t);
 declfmt(devdb::lnb_connection_t);
@@ -316,6 +332,7 @@ declfmt(devdb::run_status_t);
 declfmt(devdb::run_result_t);
 declfmt(devdb::tune_mode_t);
 declfmt(devdb::stream_t);
+declfmt(devdb::dish_t);
 #if 0 //not yet implemented
 declfmt(devdb::tuned_frequency_offsets_key_t);
 declfmt(devdb::tuned_frequency_offsets_t);
@@ -323,7 +340,6 @@ declfmt(devdb::tuned_frequency_offset_t);
 declfmt(devdb::fe_supports_t);
 declfmt(devdb::user_options_t);
 declfmt(devdb::usals_location_t);
-declfmt(devdb::rf_path_t);
 declfmt(devdb::subscription_data_t);
 #endif
 

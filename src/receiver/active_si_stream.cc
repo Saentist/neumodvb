@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -29,9 +29,11 @@
 #ifndef UNUSED
 #define UNUSED __attribute__((unused))
 #endif
-void here()
+inline void here()
 {
+#if 0
 	printf("here\n");
+#endif
 }
 
 
@@ -1991,9 +1993,10 @@ active_si_stream_t::sdt_process_service(db_txn& wtxn, const chdb::service_t& ser
 		db_found = true;
 		auto ch = c.current();
 
-		if (service.name != ch.name) {
+		if (service.name != ch.name || !ch.name_from_sdt) {
 			ch.name = service.name;
 			changed = true;
+			ch.name_from_sdt = true;
 		}
 
 		if (ch.provider != service.provider) {
@@ -2956,9 +2959,20 @@ void active_si_stream_t::save_pmts(db_txn& wtxn)
 		auto service = c.is_valid() ? c.current() : service_t{};
 		if(! c.is_valid()) {
 			service.k = service_key;
-			service.name.format("Service {}:{:d}", mux_desc, pat_service.pmt.service_id);
 		}
+		if(!service.name_from_sdt) {
+			if (pat_service.pmt.service_name.size()>0)
+				service.name = pat_service.pmt.service_name;
+			else
+				service.name.format("Service {}:{:d}", mux_desc, pat_service.pmt.service_id);
+		}
+		if (!service.provider_from_sdt) {
+			if (pat_service.pmt.provider_name.size()>0)
+				service.provider = pat_service.pmt.provider_name;
+		}
+
 		auto new_service = service;
+
 		std::visit([&](auto&mux) {
 			auto pol = get_member(mux, pol, chdb::fe_polarisation_t::NONE);
 			new_service.frequency = mux.frequency;

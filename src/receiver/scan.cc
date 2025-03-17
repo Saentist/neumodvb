@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -46,6 +46,10 @@ static inline devdb::scan_stats_t operator+(const devdb::scan_stats_t& a, const 
 	ret.locked_muxes += b.locked_muxes;
 	ret.si_muxes += b.si_muxes;
 	return ret;
+}
+
+static inline bool scan_idle(devdb::scan_stats_t& s) {
+	return s.active_muxes == 0 && s.active_bands == 0 ;
 }
 
 inline devdb::scan_stats_t scan_t::get_scan_stats() const {
@@ -242,8 +246,26 @@ bool scanner_t::housekeeping(bool force) {
 	}
 	dtdebugf("{:d} bands left to scan; {:d} active", ss.pending_bands, ss.active_bands);
 	dtdebugf("{:d} muxes left to scan; {:d} active", ss.pending_muxes, ss.active_muxes);
+	bool remove_scanner = must_end ? true : (scan_stats_done(ss) || has_timedout());
+	if(remove_scanner) {
+		cleanup();
+	}
+	return remove_scanner;
+}
 
-	return must_end ? true : scan_stats_done(ss);
+void scanner_t::cleanup()
+{
+	std::vector<task_queue_t::future_t> futures;
+	auto devdb_wtxn = receiver.devdb.wtxn();
+	//we do not iterate over elements as unsubscribe_scan erases them
+	while(scans.size() >0) {
+		auto it = scans.begin();
+		auto scan_subscription_id = it->first;
+		auto scan_ssptr = receiver.get_ssptr(scan_subscription_id);
+		unsubscribe_scan(futures, devdb_wtxn, scan_ssptr);
+	}
+	devdb_wtxn.commit();
+	wait_for_all(futures);
 }
 
 static void report(const char* msg, ssptr_t finished_ssptr,
@@ -359,8 +381,8 @@ bool scanner_t::on_scan_mux_end(const devdb::fe_t& finished_fe, const chdb::any_
 			dtdebugf("Detected exit condition");
 			must_end = true;
 		}
-
-		bool done = scan_stats_done(scan.get_scan_stats());
+		bool timed_out = has_timedout();
+		bool done = scan_stats_done(scan.get_scan_stats()) || timed_out;
 		if(must_end || done) {
 			std::vector<task_queue_t::future_t> futures;
 			auto devdb_wtxn = receiver.devdb.wtxn();
@@ -410,7 +432,7 @@ bool scanner_t::on_spectrum_scan_band_end(
 			dtdebugf("Detected exit condition");
 			must_end = true;
 		}
-		bool done = scan_stats_done(scan.get_scan_stats());
+		bool done = scan_stats_done(scan.get_scan_stats()) || has_timedout();
 		if(must_end || done) {
 			std::vector<task_queue_t::future_t> futures;
 			auto devdb_wtxn = receiver.devdb.wtxn();
@@ -537,6 +559,7 @@ scan_t::scan_try_peak(db_txn& chdb_rtxn, blindscan_t& blindscan,
 			We try these values instead of the blind scanned ones
 		*/
 		mux = db_mux;
+		mux.k.sat_pos = blindscan_key.sat_pos; //needed because mxu tuning code checks for exact network
 	} else {
 		mux.c.tune_src = tune_src_t::TEMPLATE;
 	}
@@ -668,7 +691,7 @@ scan_t::scan_next_peaks(db_txn& chdb_rtxn,
 
 
 	*/
-
+	assert(scan_stats.pending_peaks==0);
 
 	for(auto& [blindscan_key, blindscan]:  blindscans) {
 		bool& skip_sat_band = skip_map[blindscan_key];
@@ -758,6 +781,7 @@ scan_t::scan_next_muxes(db_txn& chdb_rtxn,
 			continue;
 		}
 
+		assert(scan_stats.pending_muxes==0);
 		auto c = mux_t::find_by_scan_status(chdb_rtxn, pass ==0
 																				? scan_status_t::RETRY :
 																				scan_status_t::PENDING, find_type_t::find_geq,
@@ -888,7 +912,6 @@ scan_t::scan_next(db_txn& chdb_rtxn,
 	// start as many subscriptions as possible
 	using namespace chdb;
 	std::map<blindscan_key_t, bool> skip_map;
-
 	clear_pending(scan_stats);
 
 /* First scan available spectral peaks
@@ -922,6 +945,14 @@ scan_t::scan_next(db_txn& chdb_rtxn,
 		wtxn.commit();
 		report("ERASED", reusable_ssptr, {}, chdb::dvbs_mux_t(), subscriptions);
 		wait_for_all(futures);
+	}
+
+	bool is_idle = 	scan_idle(scan_stats);
+	if(is_idle) {
+		printf("scanning has gone idle\n");
+		scanner.start_idling();
+	} else {
+		scanner.stop_idling();
 	}
 	return reusable_ssptr;
 }
@@ -986,8 +1017,6 @@ void scan_t::on_scan_mux_end(const devdb::fe_t& finished_fe, const chdb::any_mux
 	static int m =0;
 	if (m < scan_stats.active_muxes)
 		m= scan_stats.active_muxes;
-	if( m>=14 && scan_stats.active_muxes <12)
-		printf("here\n");
 	assert(scan_stats.active_muxes>=0);
 
 	bool is_peak = subscription.peak.is_present();
@@ -1356,9 +1385,10 @@ scan_t::scan_try_band(ssptr_t reusable_ssptr,
 
 
 scanner_t::scanner_t(receiver_thread_t& receiver_thread_,
-										 int max_num_subscriptions_)
+										 int max_num_subscriptions_, const std::chrono::seconds& max_idle_time_)
 	: receiver_thread(receiver_thread_)
 	, receiver(receiver_thread_.receiver)
+	, max_idle_time(max_idle_time_)
 	, scan_start_time(system_clock_t::to_time_t(system_clock_t::now()))
 	,	max_num_subscriptions(max_num_subscriptions_)
 {
@@ -1643,6 +1673,7 @@ scanner_t::~scanner_t() {
 	}
 	devdb_wtxn.commit();
 	wait_for_all(futures);
+	cleanup();
 }
 
 

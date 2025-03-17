@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -102,6 +102,7 @@ struct options_t {
 	fe_modulation modulation{PSK_8};
 	fe_delivery_system delivery_system{SYS_DVBS2};
 	int pol = 0;
+	bool bbframes_mode{false};
 
 	std::string filename_pattern{"/tmp/%s_a%d_%.3f%c.dat"};
 	std::string pls;
@@ -311,6 +312,9 @@ int options_t::parse_options(int argc, char** argv) {
 								 "DiSEqC command string (C: send committed command; "
 								 "U: send uncommitted command",
 								 true);
+	app.add_option("-b,--bb_frames", bbframes_mode,
+								 "Ask to outputput bbframes encapsulated in mpeg packets",
+								 false);
 	app.add_option("-U,--uncommitted", uncommitted, "Uncommitted switch number (lowest is 0)", true);
 	app.add_option("-C,--committed", committed, "Committed switch number (lowest is 0)", true);
 
@@ -476,7 +480,6 @@ std::tuple<int, int> getinfo(FILE* fpout, int fefd, bool pol_is_v, int allowed_f
 	int dtv_tone_prop = cmdseq.props[i++].u.data;
 	int dtv_stream_id_prop = cmdseq.props[i++].u.data;
 	int dtv_scrambling_sequence_index_prop = cmdseq.props[i++].u.data;
-
 	assert(cmdseq.props[i].u.buffer.len == 32);
 	uint32_t* isi_bitset = (uint32_t*)cmdseq.props[i++].u.buffer.data; // TODO: we can only return 32 out of 256
 																																		 // entries...
@@ -973,6 +976,10 @@ int tune_it(int fefd, int frequency_, bool pol_is_v) {
 			: (options.stream_id < 0 ? -1 : (options.stream_id & 0xff));
 		cmdseq.add(DTV_STREAM_ID, stream_id);
 	}
+	if(options.bbframes_mode) {
+		printf("Ask to output bbframes\n");
+		cmdseq.add(DTV_OUTPUT_BBFRAMES, 1);
+	}
 #if 0
 	if (options.rf_in >=0) {
 		printf("select rf_in=%d\n", options.rf_in);
@@ -1107,7 +1114,7 @@ int diseqc(int fefd, bool pol_is_v, bool band_is_high) {
 				// committed
 				if (tone_off() < 0)
 					return -1;
-				msleep(must_pause ? 200 : 30);
+				msleep(must_pause ? (200+200) : (30+200));
 				assert(options.pol == 1 || options.pol == 2);
 				int extra = (pol_is_v ? 0 : 2) | (band_is_high ? 1 : 0);
 				ret = send_diseqc_message(fefd, 'C', options.committed * 4, extra, repeated);
@@ -1123,7 +1130,7 @@ int diseqc(int fefd, bool pol_is_v, bool band_is_high) {
 				if (tone_off() < 0)
 					return -1;
 
-				msleep(must_pause ? 200 : 30);
+				msleep(must_pause ? (200+200) : (30+200));
 				ret = send_diseqc_message(fefd, 'U', options.uncommitted, 0, repeated);
 				if (ret < 0) {
 					printf("Sending Uncommitted DiseqC message failed");

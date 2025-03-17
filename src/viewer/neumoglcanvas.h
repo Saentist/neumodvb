@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -90,13 +90,9 @@ class MpvGLCanvas : public wxGLCanvas
 public:
 
 	std::atomic<bool> playing_ok = false;
-#ifndef TEST
+
 	void MpvCreate();
 	void MpvDestroy();
-	void OnMpvRedrawEvent(wxThreadEvent &event);
-
-
-#endif
 	void clear_window();
 	MpvGLCanvas(wxWindow *parent, std::shared_ptr<MpvPlayer_> player);
 	~MpvGLCanvas();

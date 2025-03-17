@@ -168,6 +168,18 @@ sat_band = db_enum(name='sat_band_t',
                            'Other'
                            ))
 
+dvb_type = db_enum(name='dvb_type_t',
+                   db = db,
+                   storage = 'int8_t',
+                   type_id = 100,
+                   version = 1,
+                   fields=(
+                       'ALL',
+                       'DVBS',
+                       'DVBC',
+                       'DVBT',
+                   ))
+
 sat_sub_band = db_enum(name='sat_sub_band_t',
                   db= db,
                   storage = 'int8_t',
@@ -809,6 +821,8 @@ service = db_struct(name ='service',
                             (9, 'boolean_t', 'encrypted', "false"),
                             (10,'boolean_t', 'expired', "false"),
                             (14,'uint16_t', 'video_pid', "0xffff"),
+                            (17, 'boolean_t', 'name_from_sdt'),
+                            (18, 'boolean_t', 'provider_from_sdt'),
                             #variable length data
                             (7, 'ss::string<16>', 'name'),
                             (8, 'ss::string<16>', 'provider'),

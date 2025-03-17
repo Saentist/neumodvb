@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -42,6 +42,13 @@ namespace devdb {
 		}
 	};
 
+	namespace cable {
+		inline void make_unique_if_template(db_txn& rtxn, cable_t& cable ) {
+			if(cable.cable_id<0)
+				cable.cable_id = devdb::make_unique_id(rtxn, cable);
+		}
+	};
+
 	namespace scan_command {
 		inline void make_unique_if_template(db_txn& wtxn, scan_command_t& scan_command) {
 			if(scan_command.id<0)
@@ -73,7 +80,7 @@ namespace devdb {
 
 	struct resource_subscription_counts_t {
 		int positioner{0};
-		int lnb{0};
+		int rf_path{0};
 		int rf_coupler{0};
 		int tuner{0};
 		int config_id{-1};
@@ -82,15 +89,12 @@ namespace devdb {
 		/*
 			if true, then no diseqc can be used, voltage and tone cannot be changed
 		*/
-		bool is_shared() const {
+		bool can_control_lnb() const {
 			bool ret=
-				(lnb > 0) || //we share tuner and lnb
+				(rf_path > 0) || //we share tuner and lnb
 				(tuner > 0) || //we share tuner and lnb
-				(rf_coupler > 0) || //we share an rf_coupler
-				(positioner > 0); //we share a positioner
-			assert(ret == (config_id>=0));
-			assert(ret == (owner>=0));
-			return ret;
+				(rf_coupler > 0); //we share an rf_coupler
+			return !ret;
 		}
 
 		bool shares_positioner() const {
@@ -113,10 +117,14 @@ namespace devdb::lnb {
 		return lnb.pol_type == devdb::lnb_pol_type_t::VH || lnb.pol_type == devdb::lnb_pol_type_t::RL;
 	}
 
+	std::optional<devdb::unicable_ch_t> select_unicable_ch(db_txn& rtxn, const lnb_t& lnb,
+																												 const devdb::fe_key_t* fe_key_to_release);
+
 }
 
 namespace devdb::fe {
-	std::optional<std::tuple<devdb::fe_t, resource_subscription_counts_t>>
+	std::optional<std::tuple<devdb::fe_t, resource_subscription_counts_t,
+													 std::optional<devdb::unicable_ch_t>>>
 	find_best_fe_for_lnb(db_txn& rtxn, const devdb::rf_path_t& rf_path, const devdb::lnb_t& lnb,
 											 const devdb::fe_key_t* fe_to_release,
 											 bool need_blindscan, bool need_spectrum, bool need_multistream,
@@ -132,7 +140,7 @@ namespace devdb::fe {
 	std::tuple<std::optional<devdb::fe_t>,
 						 std::optional<devdb::rf_path_t>,
 						 std::optional<devdb::lnb_t>,
-						 resource_subscription_counts_t>
+						 resource_subscription_counts_t, std::optional<devdb::unicable_ch_t>>
 	find_fe_and_lnb_for_tuning_to_mux(db_txn& rtxn,
 																		const chdb::dvbs_mux_t& mux,
 																		const subscription_options_t& tune_options,
@@ -150,7 +158,7 @@ namespace devdb::fe {
 	std::optional<resource_subscription_counts_t>
 	check_for_resource_conflicts(db_txn& rtxn,
 															 const fe_subscription_t& s, //desired subscription_parameter
-															 const devdb::fe_key_t* fe_key_to_release, bool on_positioner);
+															 const devdb::fe_key_t* fe_key_to_release, bool on_positioner, bool is_unicable_connection);
 
 	bool is_subscribed(const fe_t& fe);
 
@@ -177,6 +185,7 @@ namespace devdb::fe {
 	int reserve_fe_lnb_for_mux(db_txn& wtxn, subscription_id_t subscription_id,
 														 devdb::fe_t& fe, const devdb::rf_path_t& rf_path,
 														 const devdb::lnb_t& lnb, const resource_subscription_counts_t& use_counts,
+														 const std::optional<devdb::unicable_ch_t>& unicable_ch,
 														 const chdb::dvbs_mux_t& mux, const chdb::service_t* service);
 
 
@@ -205,7 +214,7 @@ namespace devdb::fe {
 														 bool do_not_unsubscribe_on_failure);
 
 	std::tuple<std::optional<devdb::fe_t>, std::optional<devdb::rf_path_t>, std::optional<devdb::lnb_t>,
-						 resource_subscription_counts_t, std::optional<devdb::fe_t>>
+						 resource_subscription_counts_t, std::optional<devdb::unicable_ch_t>, std::optional<devdb::fe_t>>
 	subscribe_mux_helper(db_txn& wtxn, subscription_id_t subscription_id, const chdb::dvbs_mux_t& mux,
 											 const chdb::service_t* service,
 											 const subscription_options_t& tune_options,

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -141,7 +141,6 @@ class TuneMuxPanel(TuneMuxPanel_):
         self.current_lnb_network_changed = False
         self.mux_subscriber_ = None
         self.tuned_ = False
-        self.lnb_activated_ = False
         self.use_blindscan_ = opts.positioner_dialog_use_blind_tune
         self.blind_toggle.SetValue(self.use_blindscan_)
         self.retune_mode_ =  pydevdb.retune_mode_t.IF_NOT_LOCKED
@@ -179,6 +178,7 @@ class TuneMuxPanel(TuneMuxPanel_):
         rf_path = evt.rf_path
         dtdebug(f"selected rf_path: {rf_path}")
         wx.CallAfter(self.ChangeRfPath, rf_path)
+
     def OnWindowDestroy(self, evt):
         dtdebug('TuneMuxPanel destroyed')
 
@@ -222,18 +222,8 @@ class TuneMuxPanel(TuneMuxPanel_):
             self.mux_subscriber_ = pyreceiver.subscriber_t(receiver, self)
         return self.mux_subscriber_
 
-    @property
-    def lnb_subscriber(self):
-        if not self.lnb_activated_:
-            self.lnb_activated_ = True;
-            self.SubscribeLnb(retune_mode=pydevdb.retune_mode_t.NEVER)
-        return self.mux_subscriber
-
-    @property
-    def tuned_mux_subscriber(self):
-        if not self.tuned_:
-            self.OnTune()
-        return self.mux_subscriber
+    def is_subscribed(self):
+        return self.mux_subscriber_!= None
 
     def get_usals_location(self):
         receiver = wx.GetApp().receiver
@@ -280,12 +270,6 @@ class TuneMuxPanel(TuneMuxPanel_):
             self.AbortTune()
             del self.mux_subscriber_
             self.mux_subscriber_ = None
-        elif self.lnb_activated_:
-            self.lnb_subscriber.unsubscribe()
-            self.tuned_ = False
-            self.lnb_activated_ = False
-            del self.mux_subscriber_
-            self.mux_subscriber_ = None
 
     def SelectInitialData(self, lnb, sat, mux):
         """
@@ -315,10 +299,9 @@ class TuneMuxPanel(TuneMuxPanel_):
                 elif len(lnb.networks)>0:
                     sat_pos = lnb.networks[0].sat_pos
                 if sat_pos != None:
-                    sat_band = pydevdb.lnb.sat_band(lnb)
-                    sat = pychdb.sat.find_by_key(chdb_txn, lnb.networks[0].sat_pos, sat_band)
+                    sat_band = pydevdb.lnb.sat_band(lnb.k)
                     sat = pychdb.sat.sat()
-                    sat.sat_band = pydevdb.lnb.sat_band(lnb)
+                    sat.sat_band = sat_band
                     sat.sat_pos = sat_pos
                     chdb_wtxn = wx.GetApp().chdb.wtxn()
                     pychdb.put_record(chdb_wtxn, sat)
@@ -333,15 +316,12 @@ class TuneMuxPanel(TuneMuxPanel_):
         dtdebug("saving")
         for n in self.lnb.networks:
             if n.sat_pos == self.sat.sat_pos:
-                changed = self.ref_mux is None or not same_mux_key(self.ref_mux.k, self.mux.k)
-                self.ref_mux = self.mux if self.signal_info is None else self.signal_info.driver_mux
+                new_ref_mux = self.mux if self.signal_info is None else self.signal_info.driver_mux
+                self.ref_mux = new_ref_mux
                 self.ref_mux.k.sat_pos = self.sat.sat_pos
                 n.ref_mux = self.ref_mux.k
-                if self.mux is not None:
-                    self.current_lnb_network_changed |= changed
                 break
-
-        if self.current_lnb_network_changed:
+        if True:
             txn = wx.GetApp().devdb.wtxn()
             #adjust lnb_connections based on possible changes in frontends
             pydevdb.lnb.update_lnb_network_from_positioner(txn, self.lnb, self.sat.sat_pos)
@@ -382,7 +362,6 @@ class TuneMuxPanel(TuneMuxPanel_):
         used when we want change a positioner without tuning
         """
         if self.tuned_:
-            assert self.lnb_activated_
             return self.tuned_ # no need to subscribe
         self.retune_mode = retune_mode
         dtdebug(f'Subscribe LNB')
@@ -393,8 +372,6 @@ class TuneMuxPanel(TuneMuxPanel_):
             dtdebug(f"Tuning failed {self.mux_subscriber.error_message}")
 
         self.tuned_ = False
-        self.lnb_activated_ = True
-        return self.lnb_activated_
 
     def Tune(self, mux, retune_mode, pls_search_range=None, silent=False):
         self.retune_mode = retune_mode
@@ -416,7 +393,6 @@ class TuneMuxPanel(TuneMuxPanel_):
             self.AbortTune()
         else:
             self.tuned_ = True
-            self.lnb_activated_ = True
         return self.tuned_
 
     def OnTune(self, event=None, pls_search_range=None):  # wxGlade: PositionerDialog_.<event_handler>
@@ -439,6 +415,10 @@ class TuneMuxPanel(TuneMuxPanel_):
         self.parent.ClearSignalInfo()
         #reread usals in case we are part of spectrum_dialog and positioner_dialog has changed them
         self.lnb = self.read_lnb_from_db()
+        network = get_network(self.lnb, mux.k.sat_pos)
+        if network is not None:
+            wx.CallAfter(self.parent.SetUsalsPos, network.usals_pos)
+
         wx.CallAfter(self.Tune,  mux, retune_mode=pydevdb.retune_mode_t.IF_NOT_LOCKED,
                      pls_search_range=pls_search_range)
         if event is not None:
@@ -457,9 +437,9 @@ class TuneMuxPanel(TuneMuxPanel_):
             del self.mux_subscriber_
             self.mux_subscriber_ = None
         self.tuned_ = False
-        self.lnb_activated_ = False
         self.ClearSignalInfo()
         self.parent.ClearSignalInfo()
+
     def OnAbortTune(self, event):
         dtdebug(f"positioner: unsubscribing")
         self.last_tuned_mux = None
@@ -607,6 +587,7 @@ class TuneMuxPanel(TuneMuxPanel_):
             self.rf_path = None
             return
         self.rf_path = rf_path
+        dtdebug(f'ChangeRfPath: {rf_path}')
         #lnb_connection = pydevdb.lnb.connection_for_rf_path(self.lnb, rf_path)
         self.parent.SetWindowTitle(self.lnb, self.lnb_connection, self.sat) #update window title
         self.positioner_rf_path_sel.Update()
@@ -876,6 +857,8 @@ class PositionerDialog(PositionerDialog_):
         set_gtk_window_name(self, "positioner") #needed to couple to css stylesheet
         self.update_constellation = True
         self.tune_mux_panel.constellation_toggle.SetValue(self.update_constellation)
+        self.Bind(EVT_RF_PATH_SELECT, self.CmdSelectRfPath)
+
     @property
     def lnb(self):
         return self.tune_mux_panel.lnb
@@ -903,14 +886,11 @@ class PositionerDialog(PositionerDialog_):
     @property
     def mux_subscriber(self):
         return self.tune_mux_panel.mux_subscriber
-
+    def is_subscribed(self):
+        return self.tune_mux_panel.is_subscribed()
     @property
-    def tuned_mux_subscriber(self):
+    def tuned_mux_subscriberOFF(self):
         return self.tune_mux_panel.tuned_mux_subscriber
-
-    @property
-    def lnb_subscriber(self):
-        return self.tune_mux_panel.lnb_subscriber
 
     def Prepare(self, lnbgrid):
         self.Layout()
@@ -995,7 +975,10 @@ class PositionerDialog(PositionerDialog_):
     def positioner_command(self, *args):
         if self.lnb_connection.rotor_control in (pydevdb.rotor_control_t.MASTER_DISEQC12,
                                       pydevdb.rotor_control_t.MASTER_USALS):
-            ret, new_usals_pos = self.lnb_subscriber.positioner_cmd(*args)
+            if not self.is_subscribed():
+                self.tune_mux_panel.SubscribeLnb(retune_mode=pydevdb.retune_mode_t.NEVER)
+                assert self.is_subscribed()
+            ret, new_usals_pos = self.mux_subscriber.positioner_cmd(*args)
             if ret >= 0:
                 if new_usals_pos is not None:
                     self.UpdateUsalsPosition_(new_usals_pos)
@@ -1245,6 +1228,18 @@ class PositionerDialog(PositionerDialog_):
         dtdebug("Set west limit")
         self.positioner_command(pydevdb.positioner_cmd_t.LIMIT_WEST)
         event.Skip()
+
+    def CmdSelectRfPath(self, evt):
+        """
+        called when user selects an rf_path from a list
+        """
+        rf_path = evt.rf_path
+        dtdebug(f"selected rf_path: {rf_path}")
+        self.tune_mux_panel.rf_path = rf_path # needed because self.lnb_connection call below
+        dtdebug(f"lnb_connection: : {self.lnb_connection}")
+        self.enable_disable_diseqc_panels()
+        wx.CallAfter(self.tune_mux_panel.ChangeRfPath, rf_path)
+        wx.CallAfter(self.diseqc_type_choice.SetValue, self.lnb_connection)
 
 def show_positioner_dialog(caller, sat=None, rf_path=None, lnb=None, mux=None):
     dlg = PositionerDialog(caller, sat=sat, rf_path=rf_path, lnb=lnb, mux=mux)

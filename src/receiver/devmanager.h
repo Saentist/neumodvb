@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -213,7 +213,8 @@ public:
 	bool received_si_mux_is_bad{false}; //true if content is deemed incorrect
 	devdb::lnb_t reserved_lnb; //lnb currently in use
 	devdb::rf_path_t reserved_rf_path; //rf_path currently reserved
-
+	int unicable_tuned_frequency{-1}; //center of frequency unicable lnb is tuned to
+	std::optional<devdb::unicable_ch_t> unicable_ch;
 	inline devdb::lnb_connection_t reserved_lnb_connection() const {
 		auto *conn = connection_for_rf_path(reserved_lnb, reserved_rf_path);
 		assert(conn);
@@ -265,9 +266,14 @@ class sec_status_t {
 
 	int voltage{-1};  // -1 means unknown or never set
 	int tone{-1};     // -1 means unknown or never set
-	steady_time_t powerup_time; //time when lnb was last powered up (any voltage > 0)
+	steady_time_t powerup_timestamp; //time when lnb was last powered up (any voltage > 0)
 
 public:
+	inline void set_powerup_time() {
+		powerup_timestamp = steady_clock_t::now();
+		dtdebugf("set powerup_time");
+	}
+
 	int retune_count{0};
 	bool is_tuned() const {
 		return tuned;
@@ -278,13 +284,17 @@ public:
 		ic.config_id = -1;
 		ic.rf_in = -1;
 	}
-
+#ifndef NDEBUG
+	inline void assert_voltage(fe_sec_voltage v) {
+		assert(v == voltage || ic.mode==FE_RESERVATION_MODE_SLAVE);
+	}
+#endif
 	/*
 		returns -1 : error
 		0: tone was already correct
 		1: tone was set as wanted
 	 */
-	int set_voltage(int fefd, fe_sec_voltage v);
+	int set_voltage(int fefd, fe_sec_voltage v, bool for_unicable_command, int sleeptime_ms=100);
 
 	int set_rf_input(int fefd, int new_rf_input, const tune_pars_t& tune_pars);
 
@@ -303,10 +313,13 @@ public:
 		return (fe_sec_voltage) voltage;
 	}
 
-	inline int positioner_wait_after_powerup(int ms) const {
+	/*
+		wait for a small amount of time
+	 */
+	inline int wait_after_powerup(int ms) const {
 		assert(voltage != SEC_VOLTAGE_OFF);
-		auto deadline  = powerup_time + std::chrono::milliseconds(ms);
-		std::this_thread::sleep_until (deadline);
+		auto deadline  = powerup_timestamp + std::chrono::milliseconds(ms);
+		std::this_thread::sleep_until (deadline); //TO FIX: needs to be interruptible by external command
 		dtdebugf("slept after powerup");
 		return 0;
 	}
@@ -373,6 +386,12 @@ private:
 	uint32_t get_lo_frequency(uint32_t frequency);
 	int send_diseqc_message(char switch_type, unsigned char port, unsigned char extra, bool repeated);
 	int send_positioner_message(devdb::positioner_cmd_t cmd, int32_t par, bool repeated=false);
+	int unicable2_tune(const devdb::lnb_t& lnb, const chdb::dvbs_mux_t& mux, const devdb::unicable_ch_t& uc);
+	int unicable1_tune(const devdb::lnb_t& lnb, const chdb::dvbs_mux_t& mux, const devdb::unicable_ch_t& uc);
+
+	int unicable2_end(int fefd, const devdb::lnb_t& lnb, const devdb::unicable_ch_t& uc);
+	int unicable1_end(int fefd, const devdb::lnb_t& lnb, const devdb::unicable_ch_t& uc);
+	int cancel_unicable();
 
 	std::tuple<bool, bool, bool>
 	set_rf_path(tuner_thread_t& tuner_thread, int fefd, const devdb::rf_path_t& new_rf_path,
@@ -422,10 +441,10 @@ private:
 																 const devdb::rf_path_t& rf_path, const devdb::lnb_t& lnb,
 																 const subscription_options_t& tune_options);
 
-int request_positioner_control(tuner_thread_t& tuner_thread, const devdb::rf_path_t& rf_path, const devdb::lnb_t& lnb,
+	int request_positioner_control(tuner_thread_t& tuner_thread, const devdb::rf_path_t& rf_path, const devdb::lnb_t& lnb,
 															 const subscription_options_t& tune_options);
 
-	std::tuple<int, int, int, double>
+	std::optional<std::tuple<int, int, int, double>>
 	get_positioner_move_stats(int16_t old_usals_pos, int16_t new_usals_pos, steady_time_t now) const;
 
 	int request_signal_info(cmdseq_t& cmdseq, signal_info_t& ret, bool get_constellation);
@@ -462,7 +481,19 @@ int request_positioner_control(tuner_thread_t& tuner_thread, const devdb::rf_pat
 
 	inline int set_tune_options(const subscription_options_t& tune_options) {
 		auto w = this->ts.writeAccess();
-		w->tune_options = tune_options;
+		if(!tune_options.tune_pars && w->tune_options.tune_pars) {
+			//copy preserving tune_pars
+			auto tune_pars = w->tune_options.tune_pars;
+			w->tune_options = tune_options;
+			w->tune_options.tune_pars = tune_pars;
+		} else if(!tune_options.tune_pars->dish && w->tune_options.tune_pars->dish) {
+			//copy preserving dish
+			auto dish = w->tune_options.tune_pars->dish;
+			w->tune_options = tune_options;
+			w->tune_options.tune_pars->dish = dish;
+		} else {
+			w->tune_options = tune_options;
+		}
 		return 0;
 	}
 

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -137,27 +137,41 @@ class LnbNetworkTable(NeumoTable):
         """
         self.screen = screen_if_t(lnbnetwork_screen_t(self), self.sort_order==2)
 
-    def matching_sat(self, sat_pos):
+    def matching_sat(self, sat_pos, txn=None):
         sats = wx.GetApp().get_sats()
-        sat_band = pydevdb.lnb.sat_band(self.lnb)
+        sat_band = pydevdb.lnb.sat_band(self.lnb.k)
         for sat in sats:
             if sat.sat_band == sat_band and abs(sat.sat_pos - sat_pos) < 5:
                 return sat
-        return None
+        for sat in sats:
+            if sat.sat_band ==pychdb.sat_band_t.UNKNOWN and abs(sat.sat_pos - sat_pos) < 5:
+                return sat
+        ss = pychdb.sat_pos_str(sat_pos)
+        add = ShowOkCancel("Add satellite?", f"No sat yet for position={ss}; add one?")
+        if not add:
+            return None
+        sat = pychdb.sat.sat()
+        sat.sat_pos = sat_pos
+        sat.sat_band = sat_band
+        txn_ = self.db.wtxn() if txn is None else txn
+        pychdb.put_record(txn_, sat)
+        if txn is None:
+            txn_.commit()
+        return sat
 
     def get_usals_location(self):
         receiver = wx.GetApp().receiver
         opts =  receiver.get_options()
         return opts.usals_location
 
-    def __save_record__(self, txn, record):
+    def __save_record__(self, txn, record, old_record):
         dtdebug(f'NETWORKS: {len(self.lnb.networks)}')
         changed = pydevdb.lnb.add_or_edit_network(self.lnb, self.get_usals_location(), record)
         if changed:
             self.changed = True
 
         for n in self.lnb.networks:
-            if self.matching_sat(n.sat_pos) is None:
+            if self.matching_sat(n.sat_pos, txn) is None:
                 ss = pychdb.sat_pos_str(n.sat_pos)
                 add = ShowOkCancel("Add satellite?", f"No sat yet for position={ss}; add one?")
                 if not add:

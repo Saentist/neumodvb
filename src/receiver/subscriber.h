@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -117,6 +117,11 @@ public:
 	inline subscription_id_t get_subscription_id() const {
 		auto r = ts.readAccess();
 		return r->subscription_id;
+	}
+
+	inline bool is_subscribed() const {
+		auto r = ts.readAccess();
+		return (int)r->subscription_id >=0;
 	}
 
 	inline void set_subscription_id(subscription_id_t subscription_id) {

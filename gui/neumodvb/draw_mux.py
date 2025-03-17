@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -22,8 +22,8 @@ import wx
 
 class MuxSelector(RectangleSelector):
     def __init__(self, parent, pol):
-        super().__init__(parent.axes, self.line_select_callback,
-                         drawtype='box', useblit=False,
+        super().__init__(parent.axes, self.line_select_callback, #drawtype='box',
+                         useblit=False,
                          button=[1],  # don't use middle button
                          minspanx=5, minspany=5,
                          spancoords='pixels',

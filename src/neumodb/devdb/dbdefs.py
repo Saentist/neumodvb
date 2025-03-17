@@ -156,13 +156,13 @@ lnb_key = db_struct(name='lnb_key',
 
 
 rf_path = db_struct(name='rf_path',
-                        fname = 'fedev',
+                    fname = 'fedev',
                     db = db,
                     type_id= lord('TC'),
                     version = 1,
                     fields = ((1, 'lnb_key_t', 'lnb'),
                               (2, 'int64_t', 'card_mac_address', -1), #Unique for each card
-                              (3, 'int8_t', 'rf_input', -1),
+                              (3, 'int8_t', 'rf_input', -1)
                               )
                     )
 
@@ -181,9 +181,27 @@ dish = db_struct(name='dish',
                            (7, 'ss::vector<int16_t,2>', 'speeds', '{100, 200}'), #Speed rotor moves at 13 and 18 V
                                                                                  #in (sat_pos) centidegrees per second
                            (8, 'time_t', 'mtime',),
-                           (9, 'bool', 'enabled', 'true')
+                           (9, 'bool', 'enabled', 'true'),
+                           (12, 'ss::string<16>', 'name', '')
                            )
                  )
+
+unicable_ch = db_struct(name='unicable_ch',
+                                 fname = 'fedev',
+                                 db = db,
+                                 type_id= lord('uc'),
+                                 version = 1,
+                                 primary_key = ('key', ('ch_id',)), #this key is needed for temporary database (per lnb)
+                                 fields = ((6, 'int8_t', 'unicable_version', 2), #channel index 0...31
+                                           (1, 'int8_t', 'ch_id', -1), #channel index 0...31
+                                           (5, 'int8_t', 'position', 0), #id of lnb if multiple are on cable
+                                           (2, 'int32_t', 'frequency', -1), #freq in Mhz on which output will be sent; -1 means
+                                           (3, 'bool',  'enabled', 'true'), #bit flag indicating if this slot is allowed
+                                           #by neumodvb on this computer
+                                           (4, 'int16_t',  'pin_code', '-1'),# -1: do not use pin
+                                           ))
+
+
 
 lnb_connection = db_struct(name='lnb_connection',
                 fname = 'fedev',
@@ -201,7 +219,8 @@ lnb_connection = db_struct(name='lnb_connection',
                           (6, 'uint8_t' , 'diseqc_mini'),
                           (7, 'int8_t' , 'diseqc_10', '-1'),
                           (8, 'int8_t' , 'diseqc_11', '-1'),
-                          # disecqc12 is not included here as this is part of the dish
+                          (15, 'bool' , 'unicable', 'true'),
+                          # disecqc12 is not included here as this is part of the dish control commands
 
                           #Sometimes more than one network can be received on the same lnb
                           #for an lnb
@@ -209,13 +228,17 @@ lnb_connection = db_struct(name='lnb_connection',
                           (10, 'int8_t', 'card_no',  '-1'), #updated as adapters are discovered
                           (14, 'int8_t', 'rf_coupler_id',  '-1'), #defines coupling with other connnection
 
-                          # list of commands separted by ";"
+                          # list of commands separated by ";"
                           #can contain
-                          #  P send positioner commands
-                          #  ? send positioner commands while keeping voltage high (todo; problem is we do not know
-                          #  when we will reach destination)
+                          #  P send positioner usals commands
+                          #  X send positioner diseqc1.2 commands
+                          #  U send uncommitted switch command
+                          #  C send committed switch command
+                          #  M send tone burst
+                          # " " wait for 50ms
                           (11, 'ss::string<16>' , 'tune_string', '"UCP"'),
                           (12,  'ss::string<16>', 'connection_name'),
+                          (16, 'int8_t', 'cable_no', -1)
                 ))
 
 
@@ -265,10 +288,12 @@ lnb = db_struct(name='lnb',
                           (8, 'int32_t', 'freq_low', -1), # lowest frequency which can be tuned
                           (9, 'int32_t', 'freq_mid', -1), # frequency to switch between low/high band
                           (10, 'int32_t', 'freq_high', -1), # highest frequency wich can be tuned
+                          (21, 'int32_t', 'powerup_time', 200), #time to wait after powerup before sending unicable
                           (11,  'time_t', 'mtime'),
                           (12, 'bool', 'can_be_used', 'true'), #updated as adapters are discovered
                           (13, 'ss::vector<lnb_network_t,1>' , 'networks'),
                           (14, 'ss::vector<lnb_connection_t,1>' , 'connections'),
+                          (20, 'ss::vector<unicable_ch_t,32>', 'unicable_channels'),
                           (15, 'ss::vector<int32_t,2>' , 'lof_offsets'), #ofset of the local oscillator (one per band)
                 ))
 
@@ -293,7 +318,8 @@ fe_supports = db_struct(name='fe_supports',
                                   (2, 'bool', 'blindscan', 'false'),
                                   (3, 'bool', 'spectrum_sweep', 'false'),
                                   (5, 'bool', 'spectrum_fft', 'false'),
-                                  (4, 'bool', 'iq', 'false')
+                                  (4, 'bool', 'iq', 'false'),
+                                  (6, 'bool', 'bbframes', 'false')
                 ))
 
 
@@ -346,9 +372,25 @@ fe_subscription = db_struct(name='fe_subscription',
                                      (8, 'int32_t', 'frequency', '0'),
                                      (10, 'int32_t', 'rf_coupler_id', '-1'),
                                      (12, 'chdb::mux_key_t' , 'mux_key'),
+                                     (15, 'std::optional<devdb::unicable_ch_t>', 'unicable_ch'), #unicable channel to use
                                      (13, 'ss::vector<subscription_data_t>' , 'subs'),
                 ))
 
+cable = db_struct(name ='cable',
+                  fname = 'fedev',
+                  db = db,
+                  type_id= lord('ci'),
+                  version = 1,
+                  ignore_for_equality_fields = ('mtime',),
+                  primary_key = ('key', ('cable_id', )),
+                  fields = ((1, 'int16_t', 'cable_id', -1), #Unique for each cable
+                            (2, 'ss::string<16>', 'cable_name', ""),
+                            (3, 'int64_t', 'card_mac_address', -1), #Unique for each card
+                            (4, 'int8_t', 'rf_input', -1),
+                            (6, 'ss::string<16>', 'connection_name', ''),
+                            (7, 'ss::vector<lnb_key_t,4>', 'connected_lnb_keys'),
+                            (8, 'time_t', 'mtime')
+                            ))
 
 fe = db_struct(name='fe',
                fname = 'fedev',
@@ -386,6 +428,7 @@ fe = db_struct(name='fe',
                    (17, 'ss::string<64>', 'card_address'),
                    (19, 'ss::vector<chdb::fe_delsys_t>', 'delsys'),
                    (27, 'ss::vector<int8_t>', 'rf_inputs'),
+                   (33, 'ss::vector<int8_t>', 'cable_nos'),
                ))
 
 

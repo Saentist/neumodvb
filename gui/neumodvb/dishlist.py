@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -53,7 +53,8 @@ class DishTable(NeumoTable):
     basic_columns=[CD(key='dish_id', sort=('dish_id', ), example='1 ', label='Dish', basic=True, readonly=True)
                    ]
     all_columns = \
-        [CD(key='dish_id', example='1 ', label='Dish', basic=True, readonly=True),
+        [CD(key='dish_id', example='1 ', label='Id', basic=True, readonly=True),
+         CD(key='name', example='wavefrontier T90????', label='Dish', basic=True, readonly=False),
          CD(key='cur_usals_pos',  label='usals\npos', basic=True, readonly=True, no_combo = True,
             dfn= lambda x: pychdb.sat_pos_str(x[1]) if x[0].cur_usals_pos==x[0].target_usals_pos \
             else strike_through(pychdb.sat_pos_str(x[1]))),
@@ -97,7 +98,7 @@ class DishTable(NeumoTable):
             self.fe_screen =pydevdb.fe.screen(txn, sort_order=sort_order)
             self.aux_screens = [ self.fe_screen]
 
-    def __save_record__(self, txn, dish):
+    def __save_record__(self, txn, dish, old_record):
         pydevdb.put_record(txn, dish)
         return dish
 

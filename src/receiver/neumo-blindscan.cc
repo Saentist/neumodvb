@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -1306,7 +1306,7 @@ int do_lnb_and_diseqc(int fefd, int frequency, bool pol_is_v) {
 	if (options.rf_in >=0) {
 		printf("select rf_in=%d\n", options.rf_in);
 		if ((ret = ioctl(fefd, FE_SET_RF_INPUT, (int32_t) options.rf_in))) {
-			printf("problem Setting rf_input\n");
+			printf("problem Setting rf_input %d\n", options.rf_in);
 			return -1;
 		}
 	}

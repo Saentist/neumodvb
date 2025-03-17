@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -196,6 +196,7 @@ inline int deserialize(const ss::bytebuffer_ &ser, ss::bytebuffer_& data, int of
 template<int buffer_size>
 inline int deserialize(const ss::bytebuffer_ &ser, ss::bytebuffer<buffer_size>& data, int offset)
 {
+	data.clear(false); //needed to clear defaults
 	return deserialize(ser, (ss::databuffer_<char>&) data, offset);
 }
 
@@ -203,6 +204,7 @@ inline int deserialize(const ss::bytebuffer_ &ser, ss::bytebuffer<buffer_size>& 
 template<typename data_t, int buffer_size>
 inline int deserialize(const ss::bytebuffer_ & ser, ss::vector<data_t, buffer_size>& vec, int offset)
 {
+	vec.clear(false); //needed to clear defaults
 	return deserialize(ser, (ss::databuffer_<data_t>&) vec, offset);
 }
 
@@ -210,6 +212,7 @@ inline int deserialize(const ss::bytebuffer_ & ser, ss::vector<data_t, buffer_si
 template<typename data_t, int buffer_size>
 inline int deserialize(const ss::bytebuffer_ & ser, ss::vector_<data_t>& vec, int offset)
 {
+	vec.clear(false); //needed to clear defaults
 	return deserialize(ser, (ss::databuffer_<data_t>&) vec, offset);
 }
 

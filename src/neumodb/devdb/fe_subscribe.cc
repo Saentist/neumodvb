@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  *
  * Copyright notice:
  *
@@ -18,18 +18,16 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
-
+#include "util/dtassert.h"
 #include "neumodb/chdb/chdb_extra.h"
 #include "receiver/neumofrontend.h"
 #include "devdb_private.h"
-#include "util/dtassert.h"
 #include <fmt/std.h>
 #include <iomanip>
 #include <iostream>
 #include <signal.h>
 
 #include "../util/neumovariant.h"
-
 using namespace devdb;
 static
 std::tuple<bool,std::optional<devdb::dish_t>>
@@ -141,8 +139,8 @@ static inline subscribe_ret_t reuse_other_subscription(
 	sret.tune_pars.send_lnb_commands = false;
 	sret.tune_pars.move_dish = false;
 	sret.tune_pars.dish = {};
-	assert(new_fe.sub.owner == getpid());
-	assert(new_fe.sub.config_id != -1);
+	assert(new_fe->sub.owner == getpid());
+	assert(new_fe->sub.config_id != -1);
 	sret.tune_pars.owner = new_fe->sub.owner;
 	sret.tune_pars.config_id = new_fe->sub.config_id;
 	return sret;
@@ -159,8 +157,8 @@ static inline subscribe_ret_t new_service(
 	sret.tune_pars.send_lnb_commands = false;
 	sret.tune_pars.move_dish = false;
 	sret.tune_pars.dish = {};
-	assert(new_fe.sub.owner == getpid());
-	assert(new_fe.sub.config_id != -1);
+	assert(new_fe->sub.owner == getpid());
+	assert(new_fe->sub.config_id != -1);
 	sret.tune_pars.owner = new_fe->sub.owner;
 	sret.tune_pars.config_id = new_fe->sub.config_id;
 	return sret;
@@ -260,7 +258,7 @@ int devdb::fe::reserve_fe_lnb_for_sat_band(db_txn& wtxn, subscription_id_t subsc
 	fe = c.current();
 	auto& sub = fe.sub;
 
-	if(use_counts.config_id<0) {
+	if(use_counts.can_control_lnb()) {
 		assert(sub.config_id <0);
 		assert(sub.owner <0);
 		sub.config_id = next_config_id++;
@@ -331,13 +329,14 @@ devdb::fe::subscribe_lnb_(db_txn& wtxn, subscription_id_t subscription_id,
 
 	if(!fe_and_use_counts)
 		return {{}, updated_old_dbfe, false}; //no frontend could be found
-	auto& [best_fe, best_use_counts ] = *fe_and_use_counts;
-	assert(tune_options.may_move_dish  && tune_options.may_control_lnb);
-	bool is_master = !best_use_counts.is_shared();
+	auto& [best_fe, best_use_counts, unicable_ch_id ] = *fe_and_use_counts;
+	assert(tune_options.may_move_dish);
+	bool is_master = best_use_counts.can_control_lnb();
 #ifndef NDEBUG
 	auto ret =
 #endif
-		devdb::fe::reserve_fe_lnb_for_sat_band(wtxn, subscription_id, tune_options, best_fe, best_use_counts, rf_path, lnb,
+		devdb::fe::reserve_fe_lnb_for_sat_band(wtxn, subscription_id, tune_options, best_fe, best_use_counts,
+																					 rf_path, lnb,
 																				 nullptr /*sat*/ , nullptr /*band_scan*/);
 	assert(ret==0); //reservation cannot fail as we have a write lock on the db
 	return {best_fe, updated_old_dbfe, is_master};
@@ -379,14 +378,14 @@ devdb::fe::subscribe_rf_path_(db_txn& wtxn, subscription_id_t subscription_id,
 		return failed(subscription_id, updated_old_dbfe);
 	}
 	auto lnb = c.current();
-	auto [fe_, updated_old_dbfe, is_master] = devdb::fe::subscribe_lnb_(
+	auto [fe_, updated_old_dbfe, send_lnb_commands] = devdb::fe::subscribe_lnb_(
 		wtxn, sret.subscription_id, rf_path, lnb, tune_options, oldfe_, fe_key_to_release);
 
 	sret.retune = false;
-	sret.tune_pars.send_lnb_commands = is_master;
+	sret.tune_pars.send_lnb_commands = send_lnb_commands;
 	if(fe_) {
-		assert(fe_.sub.owner == getpid());
-		assert(fe_.sub.config_id >= 0);
+		assert(fe_->sub.owner == getpid());
+		assert(fe_->sub.config_id >= 0);
 		sret.tune_pars.owner = fe_->sub.owner;
 		sret.tune_pars.config_id = fe_->sub.config_id;
 		bool is_same_fe = oldfe_? (fe_->k == oldfe_->k) : false;
@@ -447,6 +446,7 @@ devdb::fe::	subscribe_rf_path(db_txn& devdb_wtxn, subscription_id_t subscription
 int devdb::fe::reserve_fe_lnb_for_mux(db_txn& wtxn, subscription_id_t subscription_id,
 																			devdb::fe_t& fe, const devdb::rf_path_t& rf_path,
 																			const devdb::lnb_t& lnb, const resource_subscription_counts_t& use_counts,
+																			const std::optional<devdb::unicable_ch_t>& unicable_ch,
 																			const chdb::dvbs_mux_t& mux, const chdb::service_t* service)
 {
 	auto c = devdb::fe_t::find_by_key(wtxn, fe.k);
@@ -455,7 +455,7 @@ int devdb::fe::reserve_fe_lnb_for_mux(db_txn& wtxn, subscription_id_t subscripti
 	fe = c.current();
 	auto& sub = fe.sub;
 
-	if(use_counts.config_id<0) {
+	if(use_counts.can_control_lnb()) {
 		assert(sub.config_id <0);
 		assert(sub.owner <0);
 		sub.config_id = next_config_id++;
@@ -471,6 +471,7 @@ int devdb::fe::reserve_fe_lnb_for_mux(db_txn& wtxn, subscription_id_t subscripti
 	}
 
 	//the following settings imply that we request a non-exclusive subscription
+	sub.unicable_ch = unicable_ch;
 	sub.rf_path = rf_path;
 	sub.sat_pos = mux.k.sat_pos;
 	sub.pol = mux.pol;
@@ -510,7 +511,8 @@ int devdb::fe::reserve_fe_lnb_for_mux(db_txn& wtxn, subscription_id_t subscripti
 */
 //TODO: make this return subscribe_ret_t
 std::tuple<std::optional<devdb::fe_t>, std::optional<devdb::rf_path_t>, std::optional<devdb::lnb_t>,
-					 devdb::resource_subscription_counts_t, std::optional<devdb::fe_t> >
+					 devdb::resource_subscription_counts_t,
+					 std::optional<devdb::unicable_ch_t>, std::optional<devdb::fe_t> >
 devdb::fe::subscribe_mux_helper(db_txn& wtxn, subscription_id_t subscription_id,
 												 const chdb::dvbs_mux_t& mux,
 												 const chdb::service_t* service,
@@ -518,26 +520,26 @@ devdb::fe::subscribe_mux_helper(db_txn& wtxn, subscription_id_t subscription_id,
 												 const std::optional<devdb::fe_t>& oldfe,
 												 const devdb::fe_key_t* fe_key_to_release,
 												 bool do_not_unsubscribe_on_failure) {
-	auto[best_fe, best_rf_path, best_lnb, best_use_counts] =
+	auto[best_fe, best_rf_path, best_lnb, best_use_counts, unicable_ch] =
 		fe::find_fe_and_lnb_for_tuning_to_mux(wtxn, mux,
 																					tune_options,
 																					fe_key_to_release,
 																					false /*ignore_subscriptions*/);
 	if(do_not_unsubscribe_on_failure && ! best_fe)
-		return {{}, {}, {}, {}, {}}; //no frontend could be found
+		return {{}, {}, {}, {}, {}, {}}; //no frontend could be found
 	std::optional<devdb::fe_t> updated_old_dbfe;
 	if(oldfe)
 		updated_old_dbfe = unsubscribe(wtxn, subscription_id, oldfe->k);
 	if(!best_fe)
-		return {{}, {}, {}, {}, updated_old_dbfe}; //no frontend could be found
+		return {{}, {}, {}, {}, {}, updated_old_dbfe}; //no frontend could be found
 #ifndef NDEBUG
 	auto ret =
 #endif
-		devdb::fe::reserve_fe_lnb_for_mux(wtxn, subscription_id, *best_fe, *best_rf_path, *best_lnb, best_use_counts, mux,
-																							 service);
+		devdb::fe::reserve_fe_lnb_for_mux(wtxn, subscription_id, *best_fe, *best_rf_path, *best_lnb, best_use_counts,
+																			unicable_ch, mux, service);
 	assert(ret==0); //reservation cannot fail as we have a write lock on the db
 
-	return {best_fe, best_rf_path, best_lnb, best_use_counts, updated_old_dbfe};
+	return {best_fe, best_rf_path, best_lnb, best_use_counts, unicable_ch, updated_old_dbfe};
 }
 
 template<typename mux_t>
@@ -654,7 +656,8 @@ devdb::fe::subscribe_sat_band_(db_txn& wtxn, subscription_id_t subscription_id,
 #endif
 		devdb::fe::reserve_fe_lnb_for_sat_band(wtxn, subscription_id,
 																					 tune_options,
-																					 *best_fe, best_use_counts, *best_rf_path, *best_lnb,
+																					 *best_fe, best_use_counts,
+																					 *best_rf_path, *best_lnb,
 																					 &sat, &band_scan);
 
 	assert(ret==0); //reservation cannot fail as we have a write lock on the db
@@ -728,7 +731,7 @@ devdb::fe::subscribe_mux(db_txn& wtxn, subscription_id_t subscription_id,
 				}
 				if constexpr (is_same_type_v<mux_t, chdb::dvbs_mux_t>) {
 					assert(fe.sub.subs.size() ==1 ||
-								 (!tune_options.may_move_dish  && !tune_options.may_control_lnb &&
+								 (!tune_options.may_move_dish  &&
 									!fe_subscription::may_move_dish(fe.sub) && ! fe_subscription::may_change_lnb(fe.sub)));
 				}
 				auto sret = reuse_other_subscription(subscription_id, sub.subscription_id, fe_, updated_old_dbfe);
@@ -767,7 +770,7 @@ devdb::fe::subscribe_mux(db_txn& wtxn, subscription_id_t subscription_id,
 			}
 			if constexpr (is_same_type_v<mux_t, chdb::dvbs_mux_t>) {
 				assert(fe.sub.subs.size() ==1 ||
-							 (!tune_options.may_move_dish  && !tune_options.may_control_lnb &&
+							 (!tune_options.may_move_dish &&
 								!fe_subscription::may_move_dish(fe.sub) && ! fe_subscription::may_change_lnb(fe.sub)));
 			}
 			auto sret = new_service(subscription_id, sub_to_reuse.subscription_id, fe_, updated_old_dbfe);
@@ -789,9 +792,10 @@ devdb::fe::subscribe_mux(db_txn& wtxn, subscription_id_t subscription_id,
 		std::optional<devdb::lnb_t> lnb_;
 		devdb::resource_subscription_counts_t use_counts_;
 		std::optional<devdb::fe_t> updated_old_dbfe;
+		std::optional<devdb::unicable_ch_t> unicable_ch;
 
 		if constexpr (is_same_type_v<mux_t, chdb::dvbs_mux_t>) {
-			std::tie(fe_, rf_path_, lnb_, use_counts_, updated_old_dbfe) =
+			std::tie(fe_, rf_path_, lnb_, use_counts_, unicable_ch, updated_old_dbfe) =
 				devdb::fe::subscribe_mux_helper(
 					wtxn, sret.subscription_id, mux, service,
 					tune_options,
@@ -819,9 +823,12 @@ devdb::fe::subscribe_mux(db_txn& wtxn, subscription_id_t subscription_id,
 			assert(fe.sub.config_id >= 0);
 			sret.tune_pars.owner = fe.sub.owner;
 			sret.tune_pars.config_id = fe.sub.config_id;
-
+			if(fe.sub.unicable_ch)
+				sret.tune_pars.unicable_ch = fe.sub.unicable_ch;
+			else
+				sret.tune_pars.unicable_ch = {};
 			if constexpr (is_same_type_v<mux_t, chdb::dvbs_mux_t>) {
-				sret.tune_pars.send_lnb_commands = ! use_counts_.is_shared();
+				sret.tune_pars.send_lnb_commands = use_counts_.can_control_lnb();
 				assert(fe.sub.owner == getpid());
 				assert(fe.sub.config_id >=0);
 				sret.tune_pars.owner = fe.sub.owner;
@@ -880,7 +887,7 @@ devdb::fe::subscribe_sat_band(db_txn& wtxn, subscription_id_t subscription_id,
 			bool is_same_fe = oldfe_? (fe.k == oldfe_->k) : false;
 			sret.retune = is_same_fe;
 			sret.change_service = true;
-			sret.tune_pars.send_lnb_commands = ! use_counts_.is_shared();
+			sret.tune_pars.send_lnb_commands = use_counts_.can_control_lnb();
 			assert(fe.sub.owner != -1);
 			assert(fe.sub.config_id >= 0);
 			sret.tune_pars.owner = fe.sub.owner;
@@ -951,7 +958,6 @@ devdb::fe::matching_existing_subscription(db_txn& wtxn,
 			continue;
 		}
 		for(auto & sub: fe.sub.subs) { //loop over all subscriptions
-			assert(sub.sat_pos == sub.mux_key.sat_pos);
 			bool rf_path_matches = true;
 			if constexpr (is_same_type_v<mux_t, chdb::dvbs_mux_t>) {
 				rf_path_matches = tune_options.rf_path_is_allowed(fe.sub.rf_path);

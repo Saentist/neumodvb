@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -92,7 +92,7 @@ class DvbsMuxTable(NeumoTable):
                          record_t =  pychdb.dvbs_mux.dvbs_mux,
                          initial_sorted_column = initial_sorted_column, **kwds)
 
-    def __save_record__(self, txn, record):
+    def __save_record__(self, txn, record, old_record):
         return record
 
     def screen_getter_xxx(self, txn, sort_order):

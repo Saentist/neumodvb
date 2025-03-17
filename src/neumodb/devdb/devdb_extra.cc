@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  *
  * Copyright notice:
  *
@@ -42,6 +42,10 @@ static inline int get_id(const devdb::lnb_t& lnb) {
 	return lnb.k.lnb_id;
 }
 
+static inline int get_id(const devdb::cable_t& cable) {
+	return cable.cable_id;
+}
+
 template<typename cursor_t, typename T> static int make_unique_id_helper(cursor_t& c) {
 	int gap_start = 1; // start of a potential gap of unused extra_ids
 	for (const auto& rec : c.range()) {
@@ -65,45 +69,10 @@ template<typename cursor_t, typename T> static int make_unique_id_helper(cursor_
 	return gap_start;
 }
 
-#if 0
-template <typename cursor_t> static int16_t make_unique_id(lnb_key_t key, cursor_t& c) {
-	key.lnb_id = 0;
-	int gap_start = 1; // start of a potential gap of unused extra_ids
-	for (const auto& lnb : c.range()) {
-		if (lnb.k.lnb_id > gap_start) {
-			/*we reached the first matching mux; assign next available lower  value to lnb.k.lnb_id
-				this can only fail if about 65535 lnbs
-				In that case the loop continues, just in case some of these  65535 muxes have been deleted in the mean time,
-				which has left gaps in numbering */
-			// easy case: just assign the next lower id
-			return lnb.k.lnb_id - 1;
-		} else {
-			// check for a gap in the numbers
-			gap_start = lnb.k.lnb_id + 1;
-			assert(gap_start > 0);
-		}
-	}
-
-	if (gap_start >= std::numeric_limits<decltype(key.lnb_id)>::max()) {
-		// all ids exhausted
-		// The following is very unlikely. We prefer to cause a result on a
-		// single mux rather than throwing an error
-		dterrorf("Overflow for extra_id");
-		assert(0);
-	}
-
-	// we reach here if this is the very first mux with this key
-	return gap_start;
-}
-#endif
 
 int16_t devdb::make_unique_id(db_txn& devdb_rtxn, const devdb::lnb_key_t& key) {
 	auto c = devdb::lnb_t::find_by_key(devdb_rtxn, key.dish_id, find_geq);
-#if 0
-	return ::make_unique_id(key, c);
-#else
 	return ::make_unique_id_helper<decltype(c), devdb::lnb_t>(c);
-#endif
 }
 
 int16_t devdb::make_unique_id(db_txn& devdb_rtxn, const devdb::scan_command_t& scan_command) {
@@ -116,8 +85,24 @@ int16_t devdb::make_unique_id(db_txn& devdb_rtxn, const devdb::stream_t& stream)
 	return ::make_unique_id_helper<decltype(c), devdb::stream_t>(c);
 }
 
+int16_t devdb::make_unique_id(db_txn& devdb_rtxn, const devdb::cable_t& cable) {
+	auto c = find_first<devdb::cable_t>(devdb_rtxn);
+	return ::make_unique_id_helper<decltype(c), devdb::cable_t>(c);
+}
+
 static inline const char* lnb_type_str(const lnb_key_t& lnb_key) {
 	return devdb::to_str(lnb_key.lnb_type);
+}
+
+fmt::format_context::iterator
+fmt::formatter<devdb::unicable_ch_t>::format(const devdb::unicable_ch_t& uc, format_context& ctx) const {
+	return fmt::format_to(ctx.out(), "ver={} ch={} freq={} pos={} pin={}", uc.unicable_version, uc.ch_id, uc.frequency,
+												uc.position, uc.pin_code);
+}
+
+fmt::format_context::iterator
+fmt::formatter<devdb::rf_path_t>::format(const devdb::rf_path_t& rf_path, format_context& ctx) const {
+	return fmt::format_to(ctx.out(), "lnb={} card[0x{:06x}] #{}", rf_path.lnb,  rf_path.card_mac_address, rf_path.rf_input);
 }
 
 fmt::format_context::iterator
@@ -189,6 +174,40 @@ fmt::formatter<fe_subscription_t>::format(const fe_subscription_t& sub, format_c
 												pol_str(sub.pol), sub.mux_key.stream_id, sub.mux_key.mux_id, sub.subs.size());
 }
 
+inline static ss::string<32> make_connection_name(int card_no, int rf_input, const ss::string_& card_short_name)
+{
+	ss::string<32> ret;
+	if(rf_input >=0) {
+		if (card_no >=0)
+			ret.format("C{:d}#{:d} {:s}", card_no, rf_input, card_short_name.c_str());
+		else
+			ret.format("C??#{:d} {:s}", rf_input, card_short_name.c_str());
+	} else {
+		if (card_no >=0)
+			ret.format("C{:d}#?? {:s}", card_no, card_short_name.c_str());
+		else
+			ret.format("C??#?? {:s}", card_short_name.c_str());
+	}
+	return ret;
+}
+
+inline static ss::string<32> make_connection_name(int card_no, int rf_input, int64_t card_mac_address)
+{
+	ss::string<32> ret;
+	if(rf_input>=0) {
+		if (card_no >=0)
+			ret.format("C{:d}#{:d} {:06x}", card_no, rf_input, card_mac_address);
+		else
+			ret.format("C??#{:d} {:06x}", rf_input, card_mac_address);
+	} else{
+		if (card_no >=0)
+			ret.format("C{:d}#?? {:06x}", card_no, card_mac_address);
+		else
+			ret.format("C??#?? {:06x}", card_mac_address);
+	}
+	return ret;
+}
+
 /*
 	returns
 	  network_exists
@@ -235,9 +254,9 @@ devdb::lnb_network_t* devdb::lnb::get_network(lnb_t& lnb, int16_t sat_pos) {
 
 
 
-chdb::sat_band_t devdb::lnb::sat_band(const devdb::lnb_t& lnb) {
+chdb::sat_band_t devdb::lnb::sat_band(const devdb::lnb_key_t& lnb_key) {
 	using namespace chdb;
-	switch (lnb.k.lnb_type) {
+	switch (lnb_key.lnb_type) {
 	case lnb_type_t::C:
 		return sat_band_t::C;
 	case lnb_type_t::WDB:
@@ -414,7 +433,8 @@ bool devdb::lnb_can_scan_sat_band(const devdb::lnb_t& lnb, const chdb::sat_t& sa
 
 	Reasons why lnb cannot tune mux: c_band lnb cannot tune ku-band mux; lnb has wrong polarisation
 */
-std::tuple<int, int, int> devdb::lnb::band_voltage_freq_for_mux(const devdb::lnb_t& lnb, const chdb::dvbs_mux_t& mux) {
+std::tuple<int, int, int> devdb::lnb::band_voltage_freq_for_mux(const devdb::lnb_t& lnb,
+																																const chdb::dvbs_mux_t& mux) {
 	using namespace chdb;
 	int band = -1;
 	int voltage = -1;
@@ -545,7 +565,7 @@ devdb::lnb::select_lnb(db_txn& devdb_rtxn, const chdb::dvbs_mux_t& proposed_mux)
 	tune_options.allowed_card_mac_addresses = {};
 	//first try to find an lnb not in use, which does not require moving a dish
 
-	{ auto[best_fe, best_rf_path, best_lnb, best_use_counts] =
+	{ auto[best_fe, best_rf_path, best_lnb, best_use_counts, best_unicable_ch] =
 			fe::find_fe_and_lnb_for_tuning_to_mux(devdb_rtxn, proposed_mux,
 																						tune_options /*tune_options*/,
 																						nullptr /*fe_key_to_release*/,
@@ -563,7 +583,7 @@ devdb::lnb::select_lnb(db_txn& devdb_rtxn, const chdb::dvbs_mux_t& proposed_mux)
 	tune_options.allowed_card_mac_addresses = {};
 
 	//now try to find an lnb not in use, which does require moving a dish
-	{ auto[best_fe, best_rf_path, best_lnb, best_use_counts] =
+	{ auto[best_fe, best_rf_path, best_lnb, best_use_counts, best_unicable_ch_id] =
 			fe::find_fe_and_lnb_for_tuning_to_mux(devdb_rtxn, proposed_mux,
 																						tune_options /*tune_options*/,
 																						nullptr /*fe_key_to_release*/,
@@ -580,7 +600,7 @@ devdb::lnb::select_lnb(db_txn& devdb_rtxn, const chdb::dvbs_mux_t& proposed_mux)
 	tune_options.allowed_dish_ids = {};
 	tune_options.allowed_card_mac_addresses = {};
 	//now try to find an lnb which can be in use, and which can move a dish, also allowing non blindtune rf_paths
-	{ auto[best_fe, best_rf_path, best_lnb, best_use_counts] =
+	{ auto[best_fe, best_rf_path, best_lnb, best_use_counts, best_unicable_ch_id] =
 			fe::find_fe_and_lnb_for_tuning_to_mux(devdb_rtxn, proposed_mux,
 																						tune_options,
 																						nullptr /*fe_key_to_release*/,
@@ -771,6 +791,75 @@ bool devdb::lnb::add_or_edit_connection(db_txn& devdb_txn, devdb::lnb_t& lnb,
 	return changed;
 }
 
+bool devdb::lnb::add_or_edit_unicable_channel(db_txn& devdb_txn, devdb::lnb_t& lnb,
+																							devdb::unicable_ch_t& unicable_ch) {
+	using namespace devdb;
+	using p_t = update_lnb_preserve_t::flags;
+	auto preserve = p_t::ALL;
+	preserve = (p_t) ((int) preserve & (~(int)p_t::UNICABLE_CHANNELS));
+	//if unicable channel already exists, update it
+	bool exists{false};
+	for (auto& uc : lnb.unicable_channels) {
+		if (uc.ch_id == unicable_ch.ch_id) {
+			exists = true;
+			uc = unicable_ch;
+			break;
+		}
+	}
+	//new connection; add it
+	if(!exists) {
+		lnb.unicable_channels.push_back(unicable_ch);
+	}
+	bool save = false;
+	auto changed = lnb::update_lnb_from_db(devdb_txn, lnb, {} /*loc*/, preserve, save,
+																				 sat_pos_none, nullptr /*curr_conn*/);
+
+	//update the input argument
+	for (auto& uc : lnb.unicable_channels) {
+		if (uc.ch_id == unicable_ch.ch_id) {
+			unicable_ch = uc;
+			break;
+		}
+	}
+	return changed;
+}
+
+void devdb::cable::update_cable(db_txn& devdb_wtxn, devdb::cable_t& cable,
+																const std::optional<devdb::cable_t> old_cable_) {
+	using namespace devdb;
+	devdb::cable_t old_cable;
+	if(old_cable_)
+		old_cable = *old_cable_;
+
+	if (cable.cable_id <0) {
+		cable.cable_id = make_unique_id(devdb_wtxn, cable);
+	}
+
+	cable.mtime = time(NULL);
+	put_record(devdb_wtxn, cable);
+	if(old_cable.card_mac_address != cable.card_mac_address ||
+		 old_cable.rf_input != cable.rf_input) {
+		dtdebugf("Rewiring from={} to={}\n", old_cable.connection_name, cable.connection_name);
+		auto c = find_first<lnb_t>(devdb_wtxn);
+		for(auto lnb: c.range()) {
+			bool changed = false;
+			for(auto& c: lnb.connections) {
+				if(c.card_mac_address == old_cable.card_mac_address && c.rf_input == old_cable.rf_input) {
+					c.card_mac_address = cable.card_mac_address;
+					c.rf_input = cable.rf_input;
+					c.connection_name = make_connection_name(c.card_no, c.rf_input, c.card_mac_address);
+					changed = true;
+				}
+			}
+			if(changed) {
+				lnb.mtime = cable.mtime;
+				put_record(devdb_wtxn, lnb);
+			}
+		}
+	}
+}
+
+
 /*
 	Update the database such that lnbs all point to the correct new usals and sat positions.
 	if move_has_finished is false:
@@ -793,7 +882,7 @@ devdb::dish_t dish::schedule_move(db_txn& devdb_wtxn, devdb::lnb_t& lnb_,
 		return db_dish;
 	dish.mtime = system_clock_t::to_time_t(now);
 
-	assert(usals_pos != sat_pos_none);
+	assert(target_usals_pos != sat_pos_none);
 	dish.target_usals_pos = target_usals_pos;
 	if(move_has_finished) {
 		dish.cur_usals_pos = target_usals_pos;
@@ -1337,8 +1426,10 @@ bool devdb::lnb::update_lnb_network_from_positioner(db_txn& devdb_wtxn, devdb::l
 		changed = *db_network != *network;
 		*db_network = *network;
 	}
-	if(changed)
+	if(changed) {
+		dtdebugf("Saving lnb_network: lnb_usals_pos={} cur_sat_pos={}\n", db_lnb.lnb_usals_pos, db_lnb.cur_sat_pos);
 		put_record(devdb_wtxn, db_lnb);
+	}
 	changed |= lnb != db_lnb;
 	lnb = db_lnb;
 	return changed;
@@ -1370,8 +1461,10 @@ bool devdb::lnb::update_lnb_connection_from_positioner(db_txn& devdb_wtxn, devdb
 			break;
 		}
 	}
-	if(found)
+	if(found) {
+		dtdebugf("Saving lnb_network: lnb_usals_pos={} cur_sat_pos={}\n", db_lnb.lnb_usals_pos, db_lnb.cur_sat_pos);
 		put_record(devdb_wtxn, db_lnb);
+	}
 	return found;
 }
 
@@ -1392,90 +1485,15 @@ void devdb::lnb::reset_lof_offset(db_txn& devdb_wtxn, devdb::lnb_t&  lnb)
 	lnb.lof_offsets.resize(2);
 	lnb.lof_offsets[0] = 0;
 	lnb.lof_offsets[1] = 0;
+	dtdebugf("Saving lnb_network: lnb_usals_pos={} cur_sat_pos={}\n", lnb.lnb_usals_pos, lnb.cur_sat_pos);
 	put_record(devdb_wtxn, lnb);
 }
 
-#if 0
-static void invalidate_lnb_adapter_fields(db_txn& devdb_wtxn, devdb::lnb_t& lnb) {
-	ss::string<32> name;
-	name.clear();
-	bool any_change{lnb.can_be_used == true};
-	for (auto& conn: lnb.connections) {
-		if(conn.card_no >=0) {
-			name.format("C{:d}#?? {:06x}", conn.card_no, conn.card_mac_address);
-		} else {
-			name.format("C??#?? {:06x}", conn.card_mac_address);
-		}
-		auto can_be_used =  false;
-		bool changed = (conn.connection_name != name) || (conn.can_be_used != can_be_used);
-		any_change |= changed;
-		if (!changed)
-			continue;
-		conn.connection_name = name;
-		conn.can_be_used = can_be_used;
-	}
-	lnb.can_be_used = false;
-	if(any_change)
-		put_record(devdb_wtxn, lnb);
-}
-#endif
-
-#if 0
-static void update_lnb_adapter_fields(db_txn& devdb_wtxn, devdb::lnb_t& lnb, const devdb::fe_t& fe) {
-	ss::string<32> name;
-	auto lnb_can_be_used{false};
-	bool any_change{false};
-
-	for(auto& conn: lnb.connections) {
-		if(conn.card_mac_address != fe.card_mac_address) {
-			lnb_can_be_used |= conn.can_be_used;
-			continue;
-		}
-		name.clear();
-		auto valid_rf_input = fe.rf_inputs.contains(conn.rf_input);
-		auto card_no = valid_rf_input ? fe.card_no : -1;
-		if (card_no >=0) {
-			name.format("C{:d}#{:d} {:s}", card_no, conn.rf_input, fe.card_short_name);
-		} else {
-			name.format("C??#{:d} {:s}", conn.rf_input, fe.card_short_name);
-		}
-		assert (conn.card_mac_address == fe.card_mac_address);
-		bool changed = (conn.connection_name != name) ||(conn.card_no != card_no) ||
-			(conn.can_be_used != fe.can_be_used);
-		any_change |= changed;
-		lnb_can_be_used |= fe.can_be_used;
-		conn.can_be_used = fe.can_be_used;
-
-		if(!changed)
-			continue;
-		conn.connection_name = name;
-		conn.card_no = card_no;
-	}
-	any_change |= (lnb.can_be_used != lnb_can_be_used);
-	lnb.can_be_used = lnb_can_be_used;
-	if(!any_change)
-		return;
-	put_record(devdb_wtxn, lnb);
-}
-#endif
-
-#if 0
-/*
-	When an adapter changes name, update fields "name" and "adapter_no" in all related lnb's
- */
-void devdb::lnb::update_lnb_adapter_fields(db_txn& devdb_wtxn, const devdb::fe_t& fe) {
-	auto c = find_first<lnb_t>(devdb_wtxn);
-	for(auto lnb: c.range()) {
-		update_lnb_adapter_fields(devdb_wtxn, lnb, fe);
-	}
-}
-#endif
-
 
 /*
-	Se the can_be_used status on all lnbs and lnb connections depending on the
+	Set the can_be_used status on all lnbs and lnb connections depending on the
 	currently available fes. If update_for_fe is set, then only consider lnb connections
-	for the specific fe. This is called when fe's are added/removed at run time
+	for the specific fe. This is called when fes are added/removed at runime
  */
 void devdb::lnb::update_lnbs(db_txn& devdb_wtxn, const devdb::fe_t* update_for_fe) {
 
@@ -1506,6 +1524,7 @@ void devdb::lnb::update_lnbs(db_txn& devdb_wtxn, const devdb::fe_t* update_for_f
 			//hack to correct older database records
 			lnb.lnb_usals_pos = lnb.usals_pos;
 			lnb.cur_sat_pos = lnb.usals_pos;
+			dtdebugf("Saving lnb_network: lnb_usals_pos={} cur_sat_pos={}\n", lnb.lnb_usals_pos, lnb.cur_sat_pos);
 			put_record(devdb_wtxn, lnb);
 		}
 		bool any_change = false;
@@ -1518,12 +1537,7 @@ void devdb::lnb::update_lnbs(db_txn& devdb_wtxn, const devdb::fe_t* update_for_f
 				assert(fe.rf_inputs.contains(conn.rf_input));
 				assert (conn.card_mac_address == fe.card_mac_address);
 				auto card_no = fe.card_no;
-				assert (fe.card_no>=0);
-				if (card_no >=0) {
-					name.format("C{:d}#{:d} {:s}", card_no, conn.rf_input, fe.card_short_name);
-				} else {
-					name.format("C??#{:d} {:s}", conn.rf_input, fe.card_short_name);
-				}
+				name = make_connection_name(card_no, conn.rf_input, fe.card_short_name);
 				bool changed = (conn.connection_name != name) ||(conn.card_no != card_no) ||
 					(conn.can_be_used != fe.can_be_used);
 				any_change |= changed;
@@ -1531,11 +1545,7 @@ void devdb::lnb::update_lnbs(db_txn& devdb_wtxn, const devdb::fe_t* update_for_f
 				conn.connection_name = name;
 			} else if(!update_for_fe) {
 				//the connection cannot be used
-				if(conn.card_no >=0) {
-					name.format("C{:d}#?? {:06x}", conn.card_no, conn.card_mac_address);
-				} else {
-					name.format("C??#?? {:06x}", conn.card_mac_address);
-				}
+				name = make_connection_name(conn.card_no, -1, conn.card_mac_address);
 				auto can_be_used =  false;
 				bool changed = (conn.connection_name != name) || (conn.can_be_used != can_be_used);
 				any_change |= changed;
@@ -1546,8 +1556,10 @@ void devdb::lnb::update_lnbs(db_txn& devdb_wtxn, const devdb::fe_t* update_for_f
 		}
 		any_change |= (lnb.can_be_used != lnb_can_be_used);
 		lnb.can_be_used = lnb_can_be_used;
-		if(any_change)
+		if(any_change) {
+			dtdebugf("Saving lnb_network: lnb_usals_pos={} cur_sat_pos={}\n", lnb.lnb_usals_pos, lnb.cur_sat_pos);
 			put_record(devdb_wtxn, lnb);
+		}
 	}
 }
 
@@ -1617,5 +1629,11 @@ fmt::formatter<devdb::stream_t>::format(const devdb::stream_t& stream, format_co
 	std::visit([&](auto& content) {
 		fmt::format_to(ret, " {}", content);
 	}, stream.content);
+	return ret;
+}
+
+fmt::format_context::iterator
+fmt::formatter<devdb::dish_t>::format(const devdb::dish_t& dish, format_context& ctx) const {
+	auto ret= fmt::format_to(ctx.out(), "dish{} {}", dish.dish_id, dish.name);
 	return ret;
 }

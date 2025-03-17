@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -115,6 +115,25 @@ class SatListComboCtrl(wx.ComboCtrl):
         self.SetMinSize((w+button_size.width,h))
         self.SetPopupMinWidth(w)
         self.SetValue(cgt)
+
+    def OnDvbTypeChoice(self, evt):
+        dvb_type_choice = evt.GetEventObject()
+        v = dvb_type_choice.GetValue()
+        if v == pychdb.dvb_type_t.DVBC:
+            sat = pychdb.sat.sat()
+            sat.sat_pos = pychdb.sat.sat_pos_dvbc
+        elif v == pychdb.dvb_type_t.DVBT:
+            sat = pychdb.sat.sat()
+            sat.sat_pos = pychdb.sat.sat_pos_dvbt
+        elif v == pychdb.dvb_type_t.DVBS:
+            sat = pychdb.sat.sat()
+            sat.sat_pos = pychdb.sat.sat_pos_dvbs
+        else:
+            sat = None
+        if sat is None:
+            self.show_all()
+        else:
+            self.OnSelectSat(sat)
 
     def OnWindowCreate(self, evt):
         """

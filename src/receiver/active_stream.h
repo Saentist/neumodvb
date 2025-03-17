@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -44,6 +44,7 @@ namespace chdb {
 
 namespace devdb {
 	struct lnb_key_t;
+	struct rf_path_t;
 }
 
 
@@ -62,7 +63,6 @@ struct pid_with_use_count_t {
 
 struct subscription_options_t;
 class active_adapter_t;
-class epoll_tx1;
 
 class stream_reader_t : public std::enable_shared_from_this<stream_reader_t> {
 	constexpr static  std::chrono::duration data_timeout = 10000ms; //in ms
@@ -365,7 +365,7 @@ public:
 
 	EXPORT int get_adapter_no() const; //thread safe because it only accesses constant members
 	EXPORT int64_t get_adapter_mac_address() const; //thread safe because it only accesses constant members
-	EXPORT devdb::lnb_key_t get_adapter_lnb_key() const; //thread safe because it only accesses constant members
+	EXPORT devdb::rf_path_t get_adapter_rf_path() const;
 
 	//void process_psi(int pid, unsigned char* payload, int payload_size);
 	active_stream_t(receiver_t& receiver, const std::shared_ptr<stream_reader_t>& reader)

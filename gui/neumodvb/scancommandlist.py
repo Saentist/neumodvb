@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -152,7 +152,7 @@ class ScanCommandTable(NeumoTable):
                                              field_matchers=matchers, match_data = match_data)
         self.screen = screen_if_t(screen, self.sort_order==2)
 
-    def __save_record__(self, txn, scan_command):
+    def __save_record__(self, txn, scan_command, old_record):
         pydevdb.scan_command.make_unique_if_template(txn, scan_command)
         pydevdb.put_record(txn, scan_command)
         return scan_command

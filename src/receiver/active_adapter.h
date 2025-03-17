@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -203,9 +203,8 @@ public: //this data is safe to access from other threads
 		return current_tp();
 		//@todo make thread safe
 	};
-
-	inline devdb::lnb_key_t get_lnb_key() const {
-		return fe->ts.readAccess()->reserved_lnb.k;
+	inline devdb::rf_path_t get_rf_path() const {
+		return fe->ts.readAccess()->reserved_rf_path;
 	}
 
 	bool uses_lnb(const devdb::lnb_key_t& lnb_key) const {

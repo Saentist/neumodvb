@@ -1,5 +1,5 @@
 /*
- * Neumo dvb (C) 2019-2024 deeptho@gmail.com
+ * Neumo dvb (C) 2019-2025 deeptho@gmail.com
  * Copyright notice:
  *
  * This program is free software; you can redistribute it and/or modify
@@ -635,8 +635,9 @@ subscription_id_t receiver_thread_t::cb_t::scan_muxes(ss::vector_<mux_t>& muxes,
 		}
 	}
 	int max_num_subscriptions = 100;
+	std::chrono::seconds max_idle_time = 30s;
 	auto ret = this->receiver_thread_t::scan_muxes(futures, muxes, tune_options,
-																								 max_num_subscriptions, ssptr);
+																								 max_num_subscriptions, max_idle_time, ssptr);
 	bool error = wait_for_all(futures);
 	if (error) {
 		dterrorf("Unhandled error in scan_mux");
@@ -660,9 +661,10 @@ subscription_id_t receiver_thread_t::cb_t::scan_spectral_peaks(
 	}
 	bool scan_newly_found_muxes = true;
 	int max_num_subscriptions = 100;
+	std::chrono::seconds max_idle_time = 30s;
 	auto ret = this->receiver_thread_t::scan_spectral_peaks(futures, rf_path, peaks, spectrum_key,
 																													scan_newly_found_muxes,
-																													max_num_subscriptions, ssptr);
+																													max_num_subscriptions, max_idle_time, ssptr);
 	error = wait_for_all(futures);
 	if (error) {
 		dterrorf("Unhandled error in scan_mux");
@@ -692,10 +694,11 @@ subscription_id_t receiver_thread_t::cb_t::scan_bands(
 		}
 	}
 	int max_num_subscriptions = 100;
-
+	std::chrono::seconds max_idle_time = 30s;
 	assert(tune_options.need_spectrum);
 	auto ret =  this->receiver_thread_t::scan_bands(futures, sats, pols, tune_options,
-																												max_num_subscriptions, ssptr);
+																									max_num_subscriptions, max_idle_time,
+																									ssptr);
 
 	auto error = wait_for_all(futures);
 	if (error) {
@@ -1685,29 +1688,32 @@ void receiver_t::on_signal_info(const signal_info_t& signal_info,
 			auto* ms = ms_shared_ptr.get();
 			if (!ms) //scanning subscribers are handled by scanner
 				continue;
-			auto mpv = ms->get_mpv();
-			if(mpv) {
-				mpv->notify(signal_info);
-			}
-			if(ms->is_scanning()) {
-				has_scanning_subscribers = true;
-				continue;
-			}
 			/*
 				a subscriber can either directly handle the received signal info via
 				ms->notify_signal_info, or indirectly via scanner->notify_signal_info(*ms...)
 			 */
+			if(ms->is_scanning()) {
+				has_scanning_subscribers = true;
+				continue;
+			}
+			auto subscription_id = ms->get_subscription_id();
+			if(!subscription_ids.contains(subscription_id))
+				continue;
+			auto mpv = ms->get_mpv();
+			if(mpv) {
+				mpv->notify(signal_info);
+			} else {
 
-			/*Notify positioner dialog screens and spectrum_dialog screens which
-				are busy tuning a single mux.
+				/*Notify positioner dialog screens and spectrum_dialog screens which
+					are busy tuning a single mux.
 
-				Note that during a blindscan, spectrum_dialog
-				will not react to the following call, as they have no active subscriber_t, i.e.,
-				one associated with a specific adapter or lnb. A "blindscan all" spectrum_dialog will
-				ignore the following call
-			*/
-			if(subscription_ids.contains(ms->get_subscription_id()))
+					Note that during a blindscan, spectrum_dialog
+					will not react to the following call, as they have no active subscriber_t, i.e.,
+					one associated with a specific adapter or lnb. A "blindscan all" spectrum_dialog will
+					ignore the following call
+				*/
 				ms->notify_signal_info(signal_info);
+			}
 		}
 	}
 	auto& receiver_thread = this->receiver_thread;
@@ -1957,10 +1963,11 @@ subscription_id_t
 receiver_thread_t::scan_muxes(std::vector<task_queue_t::future_t>& futures, ss::vector_<mux_t>& muxes,
 															const subscription_options_t& tune_options,
 															int max_num_subscriptions,
+															const std::chrono::seconds& max_idle_time,
 															ssptr_t ssptr) {
 	auto scanner = get_scanner();
 	if (!scanner) {
-		scanner = std::make_unique<scanner_t>(*this, max_num_subscriptions);
+		scanner = std::make_shared<scanner_t>(*this, max_num_subscriptions, max_idle_time);
 		set_scanner(scanner);
 	}
 	auto subscription_id = ssptr->get_subscription_id();
@@ -1984,11 +1991,11 @@ receiver_thread_t::scan_bands(std::vector<task_queue_t::future_t>& futures,
 															const ss::vector_<chdb::sat_t>& sats,
 															const ss::vector_<chdb::fe_polarisation_t>& pols,
 															const subscription_options_t& tune_options,
-															int max_num_subscriptions,
+															int max_num_subscriptions, const std::chrono::seconds& max_idle_time,
 															ssptr_t ssptr) {
 	auto scanner = get_scanner();
 	if (!scanner) {
-		scanner = std::make_unique<scanner_t>(*this, max_num_subscriptions);
+		scanner = std::make_shared<scanner_t>(*this, max_num_subscriptions, max_idle_time);
 		set_scanner(scanner);
 	}
 
@@ -2026,12 +2033,14 @@ receiver_thread_t::scan_spectral_peaks(std::vector<task_queue_t::future_t>& futu
 																			 const devdb::rf_path_t& rf_path,
 																			 ss::vector_<chdb::spectral_peak_t>& peaks,
 																			 const statdb::spectrum_key_t& spectrum_key,
-																			 bool scan_found_muxes, int max_num_subscriptions,
+																			 bool scan_found_muxes,
+																			 int max_num_subscriptions,
+																			 const std::chrono::seconds& max_idle_time,
 																			 ssptr_t scan_ssptr) {
 	auto scanner = get_scanner();
 
 	if (!scanner){
-		scanner = std::make_shared<scanner_t>(*this, max_num_subscriptions);
+		scanner = std::make_shared<scanner_t>(*this, max_num_subscriptions, max_idle_time);
 		set_scanner(scanner);
 	}
 	auto subscription_id = scan_ssptr->get_subscription_id();
@@ -2242,7 +2251,9 @@ static chdb::scan_id_t activate_spectrum_scan_
 	auto [sat_band, sat_sub_band] = sat_band_for_freq(start_freq);
 #ifndef NDEBUG
 		auto [sat_band1, sat_sub_band1] = sat_band_for_freq(end_freq-1);
-		assert(sat_band1 == sat_band);
+		if(sat_band1 != sat_band)
+			dtdebugf("requested frequency range {}-{} extends beyond band {}-{}",
+							 start_freq, end_freq, to_str(sat_band), to_str(sat_band1));
 		assert(sat_band == sat.sat_band);
 #endif
 		//update sat from db to ensure correct band_scan_status
@@ -2457,17 +2468,17 @@ receiver_thread_t::cb_t::scan_muxes<chdb::dvbt_mux_t>(ss::vector_<chdb::dvbt_mux
 template subscription_id_t
 receiver_thread_t::scan_muxes(std::vector<task_queue_t::future_t>& futures, ss::vector_<chdb::dvbs_mux_t>& muxes,
 															const subscription_options_t& tune_options,
-															int max_num_subscriptions,
+															int max_num_subscriptions, const std::chrono::seconds& max_idle_time,
 															ssptr_t ssptr);
 
 
 template subscription_id_t
 receiver_thread_t::scan_muxes(std::vector<task_queue_t::future_t>& futures, ss::vector_<chdb::dvbc_mux_t>& muxes,
 															const subscription_options_t& tune_options,
-															int max_num_subscriptions,
+															int max_num_subscriptions, const std::chrono::seconds& max_idle_time,
 															ssptr_t ssptr);
 template subscription_id_t
 receiver_thread_t::scan_muxes(std::vector<task_queue_t::future_t>& futures, ss::vector_<chdb::dvbt_mux_t>& muxes,
 															const subscription_options_t& tune_options,
-															int max_num_subscriptions,
+															int max_num_subscriptions, const std::chrono::seconds& max_idle_time,
 															ssptr_t ssptr);

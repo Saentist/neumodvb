@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Neumo dvb (C) 2019-2024 deeptho@gmail.com
+# Neumo dvb (C) 2019-2025 deeptho@gmail.com
 # Copyright notice:
 #
 # This program is free software; you can redistribute it and/or modify
@@ -33,6 +33,7 @@ from neumodvb import neumodbutils
 from neumodvb.neumolist import NeumoTable, NeumoGridBase, GridPopup, screen_if_t
 from neumodvb.satlist_combo import EVT_SAT_SELECT
 import pychdb
+import pydevdb
 
 class ServiceTable(NeumoTable):
     CD = NeumoTable.CD
@@ -76,28 +77,72 @@ class ServiceTable(NeumoTable):
                          initial_sorted_column = initial_sorted_column, **kwds)
         self.app = wx.GetApp()
 
-    def __save_record__(self, txn, record):
+    def __save_record__(self, txn, record, old_record):
         pychdb.put_record(txn, record)
         return record
 
-    def screen_getter_xxx(self, txn, sort_field):
+    def get_and_add_dvbs_filter_and_relax_(self, add_dvbs_filter):
+        """
+        """
         match_data, matchers = self.get_filter_()
+        match_data2 = self.record_t()
+        matchers2 = pydevdb.field_matcher_t_vector()
+        added = False
+        freq_field_id = self.data_table.subfield_from_name("frequency")
+        if matchers is None:
+             matchers = pydevdb.field_matcher_t_vector()
+             match_data =  self.record_t()
+        if add_dvbs_filter:
+            sat_pos_field_id = self.data_table.subfield_from_name("k.mux.sat_pos")
+            m = pydevdb.field_matcher.field_matcher(sat_pos_field_id, pydevdb.field_matcher.match_type.LT)
+            match_data.k.mux.sat_pos = pychdb.sat.sat_pos_dvbs
+            matchers.push_back(m)
+        if matchers is not None:
+            for m in matchers:
+                if m.field_id == freq_field_id:
+                    m.match_type = pydevdb.field_matcher.match_type.GEQ
+                    m2 = pydevdb.field_matcher.field_matcher(freq_field_id, pydevdb.field_matcher.match_type.LEQ)
+                    matchers2.push_back(m2)
+                    freq = match_data.frequency
+                    dtdebug(f"Relaxing filter frequency={freq}")
+                    match_data.frequency = freq-500
+                    match_data2.frequency = freq+500
+                    added =True
+
+        if added:
+            return match_data, matchers, match_data2, matchers2
+        else:
+            return match_data, matchers, None, None
+
+    def screen_getter_xxx(self, txn, sort_field):
         if self.parent.restrict_to_sat:
             sat, service = self.parent.CurrentSatAndService()
-            ref = pychdb.service.service()
-            ref.k.mux.sat_pos = sat.sat_pos
             txn = self.db.rtxn()
-            screen = pychdb.service.screen(txn, sort_order=sort_field,
+            add_dvbs_filter= sat.sat_pos == pychdb.sat.sat_pos_dvbs
+            match_data, matchers, match_data2, matchers2  =\
+                self.get_and_add_dvbs_filter_and_relax_(add_dvbs_filter)
+            if add_dvbs_filter: # list is not filtered by sat but to all dvbs services
+                screen = pychdb.service.screen(txn, sort_order=sort_field,
+                                               field_matchers=matchers, match_data = match_data,
+                                               field_matchers2=matchers2, match_data2 = match_data2)
+            else:
+                ref = pychdb.service.service()
+                ref.k.mux.sat_pos = sat.sat_pos
+                screen = pychdb.service.screen(txn, sort_order=sort_field,
                                            key_prefix_type=pychdb.service.service_prefix.sat_pos,
                                            key_prefix_data=ref,
-                                           field_matchers=matchers, match_data = match_data)
+                                               field_matchers=matchers, match_data = match_data,
+                                               field_matchers2=matchers2, match_data2 = match_data2)
             txn.abort()
             del txn
         else:
+            match_data, matchers, match_data2, matchers2  = \
+                self.get_and_add_dvbs_filter_and_relax_(add_dvbs_filter=False)
             sat = None
             service = None
             screen = pychdb.service.screen(txn, sort_order=sort_field,
-                                           field_matchers=matchers, match_data = match_data)
+                                           field_matchers=matchers, match_data = match_data,
+                                           field_matchers2=matchers2, match_data2 = match_data2)
         self.screen = screen_if_t(screen, self.sort_order==2)
 
     def __new_record__(self):
@@ -343,3 +388,5 @@ class ServiceGrid(ServiceGridBase):
         sat, _ = self.CurrentSatAndService()
         self.SelectSat(sat)
         self.GrandParent.service_sat_sel.SetSat(self.restrict_to_sat, self.allow_all)
+        sat_pos = pychdb.sat.sat_pos_none if self.restrict_to_sat is None else self.restrict_to_sat.sat_pos
+        self.GrandParent.service_dvb_type_choice.SetValue(sat_pos)
